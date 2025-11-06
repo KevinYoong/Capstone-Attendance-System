@@ -1,8 +1,33 @@
-import express from 'express';
-import mysql from 'mysql2';
+import express, { Request, Response } from 'express';
+import mysql, { RowDataPacket } from 'mysql2/promise';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from "bcrypt";
+
+interface LoginRequestBody {
+  identifier: string; // can be email or student_id
+  password: string;
+}
+
+interface Student extends RowDataPacket {
+  student_id: string;
+  name: string;
+  email: string;
+  password: string;
+  phone_number?: string;
+  created_at: string;
+}
+
+interface Lecturer extends RowDataPacket {
+  lecturer_id: number;
+  name: string;
+  email: string;
+  password: string;
+  phone_number?: string;
+  created_at: string;
+}
+
+type User = Student | Lecturer;
 
 // Load the environment variables from .env
 dotenv.config();
@@ -16,24 +41,24 @@ app.use(cors()); // Allows your frontend to make requests
 app.use(express.json()); // Allows server to read JSON data
 
 // Create the connection pool to the database
-const db = mysql.createPool({
+const db: mysql.Pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-}).promise(); // Using .promise() lets us use async/await
+});
 
-app.post("/login", async (req, res) => {
-  const { identifier, password } = req.body;
+app.post("/login", async (req: Request, res: Response) => {
+  const { identifier, password } = req.body as LoginRequestBody;
 
   try {
     const isEmail = identifier.includes("@");
-    let user;
-    let role;
+    let user: User | undefined;
+    let role: 'student' | 'lecturer' | undefined;
 
     if (isEmail) {
       // Email → check Student first, then Lecturer
-      const [studentMatch] = await db.query(
+      const [studentMatch] = await db.query<Student[]>(
         "SELECT * FROM Student WHERE email = ?",
         [identifier]
       );
@@ -42,7 +67,7 @@ app.post("/login", async (req, res) => {
         user = studentMatch[0];
         role = "student";
       } else {
-        const [lecturerMatch] = await db.query(
+        const [lecturerMatch] = await db.query<Lecturer[]>(
           "SELECT * FROM Lecturer WHERE email = ?",
           [identifier]
         );
@@ -53,7 +78,7 @@ app.post("/login", async (req, res) => {
       }
     } else {
       // No '@' → treat as Student ID ONLY (Lecturers cannot use numeric ID to login)
-      const [studentMatch] = await db.query(
+      const [studentMatch] = await db.query<Student[]>(
         "SELECT * FROM Student WHERE student_id = ?",
         [identifier]
       );
@@ -93,9 +118,9 @@ app.post("/login", async (req, res) => {
 });
 
 // Create a test route to check database connection
-app.get('/test_db', async (req, res) => {
+app.get('/test_db', async (req: Request, res: Response) => {
   try {
-    const [results] = await db.query('SELECT 1');
+    const [results] = await db.query<mysql.RowDataPacket[]>('SELECT 1');
     res.status(200).json({ 
       message: 'Database connection successful!', 
       data: results 
