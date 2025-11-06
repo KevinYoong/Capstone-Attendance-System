@@ -1,11 +1,9 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './index.css';
-import App from './App'; // <-- no need to include .tsx
+import App from './App';
 
-// Type assertion to tell TS that root element exists
-const rootElement = document.getElementById('root')!;
-createRoot(rootElement).render(
+createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
   </StrictMode>

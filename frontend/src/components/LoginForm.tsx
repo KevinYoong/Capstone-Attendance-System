@@ -1,13 +1,40 @@
-import React, { useState } from "react";
+import { useState, FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { loginUser } from "../services/api";
+import { useAuth } from "../context/AuthContext";
 
 export default function LoginForm() {
-  const [identifier, setIdentifier] = useState<string>(""); // can be student ID or email
-  const [password, setPassword] = useState<string>("");
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  
+  const navigate = useNavigate();
+  const { login } = useAuth();
 
-  const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    console.log("Logging in with:", identifier, password);
-    // Later → call backend: /login?identifier=...
+    setError("");
+    setIsLoading(true);
+
+    try {
+      const response = await loginUser({ identifier, password });
+
+      // Save user in AuthContext
+      login(response.user);
+
+      // Navigate based on role
+      navigate(
+        response.user.role === "student"
+          ? "/student"
+          : "/lecturer"
+      );
+
+    } catch (err: any) {
+      setError(err.response?.data?.message || "Invalid login credentials");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
