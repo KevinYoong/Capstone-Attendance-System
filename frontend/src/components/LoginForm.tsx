@@ -1,10 +1,10 @@
-import { useState } from "react";
+import React, { useState } from "react";
 
 export default function LoginForm() {
-  const [identifier, setIdentifier] = useState(""); // can be student ID or email
-  const [password, setPassword] = useState("");
+  const [identifier, setIdentifier] = useState<string>(""); // can be student ID or email
+  const [password, setPassword] = useState<string>("");
 
-  const handleLogin = (e) => {
+  const handleLogin = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     console.log("Logging in with:", identifier, password);
     // Later → call backend: /login?identifier=...

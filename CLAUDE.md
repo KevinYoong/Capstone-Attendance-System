@@ -1,96 +1,140 @@
-# CLAUDE.md
+# CLAUDE.md  
+Guidance file for AI coding assistants working on this repository.
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+---
 
 ## Project Overview
 
-This is a **Capstone Attendance System** - a full-stack geolocation-based attendance tracking application with separate frontend and backend.
+This is a **Capstone Attendance System**: a full-stack geolocation-based attendance tracking app with separate interfaces for students and lecturers.
 
-**Tech Stack:**
-- **Frontend**: React 19 + Vite, TailwindCSS
-- **Backend**: Express.js (Node.js), MySQL with mysql2
-- **Authentication**: bcrypt for password hashing, JWT tokens (jsonwebtoken)
+The system verifies attendance based on **location**, optionally via **QR scan → auto-check-in**, and tracks class history and attendance analytics.
 
-## Architecture
+### Current Status (as of now)
+- ✅ Database schema created (MySQL)
+- ✅ Backend Express server running with `/login` endpoint
+- ✅ Login UI implemented in React + Tailwind
+- ✅ Students can log in via student_id **or** email
+- ✅ Lecturers log in via email only
+- ⏳ Frontend and backend are **not yet connected**
+- ⏳ No dashboard or routing yet
 
-### Frontend (`/frontend`)
-- **Build Tool**: Vite with React plugin and HMR
-- **Styling**: TailwindCSS with PostCSS
-- **Structure**:
-  - `src/pages/` - Page-level components (LoginPage)
-  - `src/components/` - Reusable components (LoginForm)
-  - `src/App.jsx` - Root application component (currently renders LoginPage)
-  - `src/main.jsx` - Application entry point with StrictMode
+---
 
-### Backend (`/backend`)
-- **Single-file API** (`index.js`) using Express with CORS middleware
-- **Database**: MySQL connection pool with promise-based queries (mysql2/promise)
-- **Authentication Flow**:
-  - `/login` POST endpoint accepts `identifier` (student ID or email) and `password`
-  - Students can login with student_id OR email
-  - Lecturers can ONLY login with email (not numeric ID)
-  - Passwords are bcrypt-hashed and verified via `bcrypt.compare()`
-  - Returns user object with role (`student` or `lecturer`)
+## Tech Stack
 
-### Database Schema
-The backend expects MySQL tables:
-- `Student` table with columns: `student_id`, `email`, `password`, `name`
-- `Lecturer` table with columns: `lecturer_id`, `email`, `password`, `name`
+| Layer | Technology |
+|------|------------|
+| **Frontend** | React 19 + Vite, TailwindCSS |
+| **Backend** | Node.js (Express) |
+| **Database** | MySQL (`mysql2/promise`) |
+| **Auth** | bcrypt (password hashing), JWT planned |
+| **Build & Dev** | Vite HMR, npm scripts |
 
-### Environment Configuration
-Backend requires `.env` file with:
-- `PORT` - Server port (defaults to 3001)
-- `DB_HOST` - MySQL host
-- `DB_USER` - MySQL username
-- `DB_PASSWORD` - MySQL password
-- `DB_NAME` - Database name
+---
 
-## Development Commands
+## Folder Structure
 
-### Frontend
-```bash
-cd frontend
-npm install          # Install dependencies
-npm run dev          # Start dev server (Vite HMR)
-npm run build        # Production build
-npm run lint         # Run ESLint
-npm run preview      # Preview production build
-```
+attendance_system/
+│
+├── backend/
+│ ├── index.js # Express server
+│ ├── .env # DB credentials (not committed)
+│ └── package.json
+│
+├── frontend/
+│ ├── src/
+│ │ ├── pages/ # Page components (LoginPage, Dashboard, etc.)
+│ │ ├── components/ # Reusable components (LoginForm)
+│ │ ├── App.jsx
+│ │ └── main.jsx
+│ ├── index.html
+│ └── package.json
+│
+└── CLAUDE.md # THIS FILE
 
-### Backend
-```bash
-cd backend
-npm install          # Install dependencies
-node index.js        # Start server (default port 3001)
-```
 
-**Note**: Backend currently has no start script in package.json - run directly with `node index.js`
+---
 
-### Testing Database Connection
-The backend includes a test endpoint:
-```bash
-curl http://localhost:3001/test_db
-```
+## Authentication Rules
 
-## Important Implementation Notes
+| User Type | Login Identifier | Allowed? | Notes |
+|----------|----------------|---------|------|
+| Student | **Email** | ✅ |
+| Student | **Student ID (numeric)** | ✅ |
+| Lecturer | **Email** | ✅ |
+| Lecturer | Numeric ID login | ❌ Prevented intentionally |
 
-1. **Authentication Logic** (`backend/index.js:26-93`):
-   - Identifier with '@' → checks Student table first, then Lecturer table by email
-   - Identifier without '@' → checks ONLY Student table by student_id
-   - This prevents lecturers from using numeric IDs to login
+Passwords are **bcrypt-hashed**, never stored in plain text.
 
-2. **MySQL Pool**: Backend uses `mysql.createPool().promise()` for async/await support - all queries should use await with destructured array results
+---
 
-3. **CORS**: Currently configured with `cors()` middleware with no restrictions - tighten for production
+## Backend Notes (Express API)
 
-4. **Password Security**: All passwords must be bcrypt-hashed before storing in database
+### Base URL
 
-5. **Frontend API Integration**: LoginForm component (frontend/src/components/LoginForm.jsx:7-11) has a placeholder for backend integration - needs axios call to POST `/login`
+http://localhost:3001
 
-## Current State
+### Existing Endpoints
+| Method | Route | Purpose |
+|--------|--------|---------|
+| GET | `/test_db` | Verify DB connection |
+| POST | `/login` | Authenticate student/lecturer |
 
-- Login UI is complete with TailwindCSS styling
-- Backend login endpoint is fully functional with role-based authentication
-- Frontend-backend integration is NOT YET CONNECTED (LoginForm just logs to console)
-- No routing implemented yet (App.jsx only renders LoginPage)
-- JWT token generation code is included in dependencies but not yet implemented in the login endpoint
+### Planned Backend Endpoints
+| Increment | Feature | Routes To Implement |
+|----------|---------|--------------------|
+| Increment 1 | Student check-in + session handling | `POST /sessions/start`, `POST /checkin` |
+| Increment 2 | Geolocation enforcement | Validate coordinates in `POST /checkin` |
+| Increment 3 | Online mode toggle | `PATCH /sessions/:id/toggle-online` |
+| Increment 4 | Lecturer attendance history | `GET /sessions/:id/attendance`, `GET /lecturer/:id/sessions` |
+| Increment 5 | Student dashboard & analytics | `GET /student/:id/stats` |
+
+We will later introduce:
+- JWT token issuance at `/login`
+- `Authorization: Bearer <token>` middleware
+
+---
+
+## Frontend Notes (React + Tailwind)
+
+### Current Pages
+| Page | File | State |
+|------|------|-------|
+| Login Page | `src/pages/LoginPage.jsx` | ✅ Done |
+
+### Planned Pages (Upcoming)
+| Page | Purpose |
+|------|---------|
+| Student Dashboard | Show joined classes & check-in button |
+| Lecturer Dashboard | Start/end class sessions, view attendees |
+| Class Attendance View | View attendance logs |
+| Setup Page (optional) | Lecturer creates classes, add students |
+
+### Planned UI Enhancements
+- QR Code scanner page (mobile optimized)
+- Geolocation permission request UI
+- Toast / Snackbar notifications for feedback
+
+---
+
+## Development Roadmap (Increments)
+
+| Increment | Feature | Status | Expected Output |
+|----------|---------|--------|----------------|
+| 1 | Replace Code-Based Check-In with **One-Click Check-In + QR Shortcut** | ⏳ Pending | `checkin` route, start session UI |
+| 2 | **Geolocation Verification** | ⏳ Pending | GPS accuracy & distance threshold logic |
+| 3 | **Online Mode Switch** (no geolocation required) | ⏳ Pending | Toggle UI + backend route |
+| 4 | **Lecturer Attendance History View** | ⏳ Pending | Dashboard page + API routes |
+| 5 | **Student Attendance Analytics Dashboard** | ⏳ Pending | Charts (attendance % per class) |
+
+---
+
+## Key Rules AI Assistants Should Follow
+
+1. **Do not rewrite working code unless necessary.**
+2. **Frontend must use functional components + hooks.**
+3. **Backend must use async/await with `db.query()`.**
+4. **NEVER store raw passwords. Always hash using bcrypt.**
+5. If creating a new backend route → follow existing file structure and response format:
+   ```js
+   return res.status(200).json({ success: true, data: ... });
