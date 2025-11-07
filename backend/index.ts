@@ -1,11 +1,24 @@
 import express, { Request, Response } from 'express';
-import mysql, { RowDataPacket } from 'mysql2/promise';
+import db from "./db";
+import mysql, { RowDataPacket } from "mysql2/promise";
 import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from "bcrypt";
+import studentRoutes from "./src/routes/studentRoutes";
+import lecturerRoutes from "./src/routes/lecturerRoutes";
+
+dotenv.config();
+
+const app = express();
+const port = process.env.PORT || 3001;
+
+app.use(cors());
+app.use(express.json());
+app.use("/student", studentRoutes);
+app.use("/lecturer", lecturerRoutes);
 
 interface LoginRequestBody {
-  identifier: string; // can be email or student_id
+  identifier: string;
   password: string;
 }
 
@@ -29,25 +42,6 @@ interface Lecturer extends RowDataPacket {
 
 type User = Student | Lecturer;
 
-// Load the environment variables from .env
-dotenv.config();
-
-// Set up Express app and port
-const app = express();
-const port = process.env.PORT || 3001;
-
-// Set up middleware
-app.use(cors()); // Allows your frontend to make requests
-app.use(express.json()); // Allows server to read JSON data
-
-// Create the connection pool to the database
-const db: mysql.Pool = mysql.createPool({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-});
-
 app.post("/login", async (req: Request, res: Response) => {
   const { identifier, password } = req.body as LoginRequestBody;
 
@@ -57,8 +51,7 @@ app.post("/login", async (req: Request, res: Response) => {
     let role: 'student' | 'lecturer' | undefined;
 
     if (isEmail) {
-      // Email → check Student first, then Lecturer
-      const [studentMatch] = await db.query<Student[]>(
+      const [studentMatch] = await db.query<(Student & RowDataPacket)[]>(
         "SELECT * FROM Student WHERE email = ?",
         [identifier]
       );
@@ -67,7 +60,7 @@ app.post("/login", async (req: Request, res: Response) => {
         user = studentMatch[0];
         role = "student";
       } else {
-        const [lecturerMatch] = await db.query<Lecturer[]>(
+        const [lecturerMatch] = await db.query<(Lecturer & RowDataPacket)[]>(
           "SELECT * FROM Lecturer WHERE email = ?",
           [identifier]
         );
@@ -77,37 +70,29 @@ app.post("/login", async (req: Request, res: Response) => {
         }
       }
     } else {
-      // No '@' → treat as Student ID ONLY (Lecturers cannot use numeric ID to login)
-      const [studentMatch] = await db.query<Student[]>(
+      const [studentMatch] = await db.query<(Student & RowDataPacket)[]>(
         "SELECT * FROM Student WHERE student_id = ?",
         [identifier]
       );
 
       if (studentMatch.length > 0) {
         user = studentMatch[0];
-        role = "student"; // student confirmed
+        role = "student";
       }
     }
 
-    // If nothing matched
-    if (!user) {
-      return res.status(401).json({ message: "User not found." });
-    }
+    if (!user) return res.status(401).json({ message: "User not found." });
 
-    // Verify password hash
     const passwordMatch = await bcrypt.compare(password, user.password);
-    if (!passwordMatch) {
-      return res.status(401).json({ message: "Incorrect password." });
-    }
+    if (!passwordMatch) return res.status(401).json({ message: "Incorrect password." });
 
-    // Success → return user info (no password!)
     res.status(200).json({
       message: "Login successful.",
       user: {
-        id: role === "student" ? user.student_id : user.lecturer_id,
+        id: role === "student" ? (user as Student).student_id : (user as Lecturer).lecturer_id,
         name: user.name,
         email: user.email,
-        role: role,
+        role,
       },
     });
 
@@ -117,23 +102,6 @@ app.post("/login", async (req: Request, res: Response) => {
   }
 });
 
-// Create a test route to check database connection
-app.get('/test_db', async (req: Request, res: Response) => {
-  try {
-    const [results] = await db.query<mysql.RowDataPacket[]>('SELECT 1');
-    res.status(200).json({ 
-      message: 'Database connection successful!', 
-      data: results 
-    });
-  } catch (err) {
-    res.status(500).json({ 
-      message: 'Database connection failed.', 
-      error: err 
-    });
-  }
-});
-
-// Start the server
 app.listen(port, () => {
-  console.log(`🚀 Server running on http://localhost:${port}`);
+  console.log(`✅ Server running on http://localhost:${port}`);
 });
