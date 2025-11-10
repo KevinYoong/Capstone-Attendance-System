@@ -57,13 +57,12 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
       [student_id]
     );
 
-    // Copy empty week (so we don't modify shared object)
-    const week: Week = {
-      Monday: [],
-      Tuesday: [],
-      Wednesday: [],
-      Thursday: [],
-      Friday: [],
+    const week: Record<string, any[]> = {
+        Monday: [],
+        Tuesday: [],
+        Wednesday: [],
+        Thursday: [],
+        Friday: []
     };
 
     rows.forEach((cls) => {

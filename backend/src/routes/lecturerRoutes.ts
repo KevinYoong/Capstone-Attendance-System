@@ -4,6 +4,7 @@ import { RowDataPacket } from "mysql2/promise";
 
 const router = Router();
 
+// ----- TYPES -----
 interface ClassRow extends RowDataPacket {
   class_id: number;
   class_name: string;
@@ -14,36 +15,45 @@ interface ClassRow extends RowDataPacket {
   class_type: "Lecture" | "Tutorial";
 }
 
-type Week = {
-  Monday: ClassRow[];
-  Tuesday: ClassRow[];
-  Wednesday: ClassRow[];
-  Thursday: ClassRow[];
-  Friday: ClassRow[];
-};
+interface StudentRow extends RowDataPacket {
+  student_id: number;
+  name: string;
+  email: string;
+}
 
+interface CheckinRow extends RowDataPacket {
+  checkin_id: number;
+  student_id: number;
+  code_id: number;
+  checkin_time: Date;
+  status: string;
+}
+
+interface SessionRow extends RowDataPacket {
+  session_id: number;
+  class_id: number;
+  started_at: Date;
+  expires_at: Date;
+  online_mode: boolean;
+}
+
+// ----- ROUTES -----
+
+// Get weekly schedule for a lecturer
 router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => {
   const { lecturer_id } = req.params;
 
   try {
     const [rows] = await db.query<ClassRow[]>(
       `
-      SELECT 
-        class_id,
-        class_name,
-        course_code,
-        day_of_week,
-        start_time,
-        end_time,
-        class_type
-      FROM Class
+      SELECT * FROM Class
       WHERE lecturer_id = ?
-      ORDER BY FIELD(day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday'), start_time;
+      ORDER BY FIELD(day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday'), start_time
       `,
       [lecturer_id]
     );
 
-    const week: Week = {
+    const week: Record<string, ClassRow[]> = {
       Monday: [],
       Tuesday: [],
       Wednesday: [],
@@ -51,14 +61,91 @@ router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => 
       Friday: [],
     };
 
-    rows.forEach((cls) => {
+    rows.forEach(cls => {
       week[cls.day_of_week].push(cls);
     });
 
     res.json(week);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Error retrieving lecturer schedule" });
+    res.status(500).json({ message: "Error retrieving classes" });
+  }
+});
+
+// Get detailed class info
+router.get("/class/:class_id", async (req: Request, res: Response) => {
+  const { class_id } = req.params;
+
+  try {
+    // Get class info
+    const [classRows] = await db.query<ClassRow[]>(
+      `SELECT * FROM Class WHERE class_id = ?`,
+      [class_id]
+    );
+    const classInfo = classRows[0];
+    if (!classInfo) return res.status(404).json({ message: "Class not found" });
+
+    // Get enrolled students
+    const [studentRows] = await db.query<StudentRow[]>(
+      `
+      SELECT Student.student_id, Student.name, Student.email
+      FROM StudentClass
+      JOIN Student ON StudentClass.student_id = Student.student_id
+      WHERE StudentClass.class_id = ?
+      `,
+      [class_id]
+    );
+
+    // Get latest session (if any)
+    const [sessionRows] = await db.query<SessionRow[]>(
+      `SELECT * FROM Session WHERE class_id = ? ORDER BY started_at DESC LIMIT 1`,
+      [class_id]
+    );
+    const latestSession = sessionRows.length > 0 ? sessionRows[0] : null;
+
+    // Get check-ins for this session
+    let checkins: CheckinRow[] = [];
+    if (latestSession) {
+      const [checkinRows] = await db.query<CheckinRow[]>(
+        `SELECT * FROM Checkin WHERE code_id = ?`,
+        [latestSession.session_id]
+      );
+      checkins = checkinRows;
+    }
+
+    res.json({
+      classInfo,
+      students: studentRows,
+      session: latestSession,
+      checkins,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error retrieving class details" });
+  }
+});
+
+// Activate check-in for a class
+router.post("/class/:class_id/activate", async (req: Request, res: Response) => {
+  const { class_id } = req.params;
+
+  try {
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 30); // session lasts 30 minutes
+
+    const [result] = await db.query(
+      `INSERT INTO Session (class_id, expires_at, online_mode) VALUES (?, ?, ?)`,
+      [class_id, expiresAt, true]
+    );
+
+    res.status(201).json({
+      message: "Check-in activated",
+      session_id: (result as any).insertId,
+      expires_at: expiresAt,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Error activating check-in" });
   }
 });
 
