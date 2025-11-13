@@ -38,11 +38,14 @@ export default function LecturerClassDetail() {
     const fetchData = async () => {
       try {
         const res = await axios.get(
-          `http://localhost:3001/lecturer/class/${class_id}`
+          `http://localhost:3001/lecturer/class/${class_id}/details`
         );
-        setClassInfo(res.data.class);
-        setSession(res.data.session);
-        setStudents(res.data.students);
+        setClassInfo(res.data.classInfo);
+        setSession(res.data.latestSession);
+        setStudents(res.data.students.map((s: any) => ({
+          ...s,
+          status: "pending", // for now everyone is pending
+        })));
         setLoading(false);
       } catch (err) {
         console.error(err);
@@ -54,14 +57,24 @@ export default function LecturerClassDetail() {
   const handleActivateCheckIn = async () => {
     try {
       const res = await axios.post(
-        `http://localhost:3001/lecturer/class/${class_id}/activate`
+        `http://localhost:3001/lecturer/class/${class_id}/activate-checkin`
       );
-      setSession({ session_id: res.data.session_id, started_at: new Date().toISOString(), expires_at: res.data.expires_at });
-      // Refresh student status
+
+      // Update session in frontend
+      setSession({
+        session_id: res.data.sessionId,
+        started_at: new Date().toISOString(),
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+      });
+
+      // Refresh student list (optional)
       const studentsRes = await axios.get(
-        `http://localhost:3001/lecturer/class/${class_id}`
+        `http://localhost:3001/lecturer/class/${class_id}/details`
       );
-      setStudents(studentsRes.data.students);
+      setStudents(studentsRes.data.students.map((s: any) => ({
+        ...s,
+        status: "pending",
+      })));
     } catch (err) {
       console.error(err);
     }

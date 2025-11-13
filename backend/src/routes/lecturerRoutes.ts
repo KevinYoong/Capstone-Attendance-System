@@ -73,7 +73,7 @@ router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => 
 });
 
 // Get detailed class info
-router.get("/class/:class_id", async (req: Request, res: Response) => {
+router.get("/class/:class_id/details", async (req: Request, res: Response) => {
   const { class_id } = req.params;
 
   try {
@@ -107,7 +107,7 @@ router.get("/class/:class_id", async (req: Request, res: Response) => {
     let checkins: CheckinRow[] = [];
     if (latestSession) {
       const [checkinRows] = await db.query<CheckinRow[]>(
-        `SELECT * FROM Checkin WHERE code_id = ?`,
+        `SELECT * FROM Checkin WHERE session_id = ?`,
         [latestSession.session_id]
       );
       checkins = checkinRows;
@@ -126,16 +126,16 @@ router.get("/class/:class_id", async (req: Request, res: Response) => {
 });
 
 // Activate check-in for a class
-router.post("/class/:class_id/activate", async (req: Request, res: Response) => {
+router.post("/class/:class_id/activate-checkin", async (req: Request, res: Response) => {
   const { class_id } = req.params;
 
   try {
-    const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 30); // session lasts 30 minutes
+    const startedAt = new Date();
+    const expiresAt = new Date(startedAt.getTime() + 30 * 60000);
 
     const [result] = await db.query(
-      `INSERT INTO Session (class_id, expires_at, online_mode) VALUES (?, ?, ?)`,
-      [class_id, expiresAt, true]
+      `INSERT INTO Session (class_id, started_at, expires_at, online_mode) VALUES (?, ?, ?, ?)`,
+      [class_id, startedAt, expiresAt, true]
     );
 
     res.status(201).json({
