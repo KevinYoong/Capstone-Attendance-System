@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import db from "../../db";
 import { RowDataPacket } from "mysql2/promise";
+import { io } from "../../index";
 
 const router = Router();
 
@@ -138,9 +139,15 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
       [class_id, startedAt, expiresAt, true]
     );
 
+    const session_id = (result as any).insertId;
+
+    // Notify all connected clients (students) that a check-in has been activated
+    io.emit("checkinActivated", { class_id, session_id, startedAt, expiresAt });
+
     res.status(201).json({
       message: "Check-in activated",
-      session_id: (result as any).insertId,
+      session_id,
+      started_at: startedAt,
       expires_at: expiresAt,
     });
   } catch (err) {

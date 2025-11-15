@@ -41,7 +41,7 @@ export default function LecturerClassDetail() {
           `http://localhost:3001/lecturer/class/${class_id}/details`
         );
         setClassInfo(res.data.classInfo);
-        setSession(res.data.latestSession);
+        setSession(res.data.session);
         setStudents(res.data.students.map((s: any) => ({
           ...s,
           status: "pending", // for now everyone is pending

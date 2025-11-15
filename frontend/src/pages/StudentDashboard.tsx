@@ -1,7 +1,10 @@
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
+import { io } from "socket.io-client";
 import axios from 'axios';
+
+const socket = io("http://localhost:3001");
 
 interface Class {
   class_id: number;
@@ -35,6 +38,11 @@ export default function StudentDashboard() {
   });
   const [openDays, setOpenDays] = useState<string[]>([]);
 
+  const [activeSessions, setActiveSessions] = useState<Record<number, {
+    session_id: number;
+    expiresAt: string;
+  }>>({});
+
   const handleLogout = () => {
     logout();
     navigate('/');
@@ -59,6 +67,24 @@ export default function StudentDashboard() {
     if (Object.keys(weekSchedule).includes(today)) {
       setOpenDays([today]);
     }
+
+    // ----- SOCKET LISTENER -----
+    socket.on("checkinActivated", (data) => {
+      console.log("Activated:", data);
+
+      setActiveSessions((prev) => ({
+        ...prev,
+        [data.class_id]: {
+          session_id: data.session_id,
+          expiresAt: data.expiresAt
+        }
+      }));
+    });
+
+    return () => {
+      socket.off("checkinActivated");
+    };
+
   }, [user]);
 
   const toggleDay = (day: string) => {
@@ -134,7 +160,10 @@ export default function StudentDashboard() {
                 {classes.length === 0 ? (
                   <p className="text-gray-400 px-4 py-2 text-center">No classes today.</p>
                 ) : (
-                  classes.map((cls, idx) => (
+                  classes.map((cls, idx) => {
+                  const isActive = activeSessions[cls.class_id] !== undefined;
+                  
+                  return (
                     <div
                       key={cls.class_id}
                       className={`px-4 py-3 ${
@@ -146,16 +175,24 @@ export default function StudentDashboard() {
                           {cls.class_name} ({cls.course_code})
                         </h3>
                         <p className="text-gray-400">Lecturer: {cls.lecturer_name}</p>
-                        {statusBadge(cls.status)}
+                        {isActive 
+                          ? <span className="text-yellow-400 font-semibold">🟡 Check-in open</span>
+                          : <span className="text-gray-400 font-semibold">⚪ Pending</span>
+                        }
                       </div>
                       <button
                         onClick={() => handleCheckIn(cls.class_id)}
-                        className="mt-2 md:mt-0 px-4 py-2 bg-yellow-500 text-black rounded-lg hover:bg-yellow-400 transition"
+                        disabled={!isActive}
+                        className={`mt-2 md:mt-0 px-4 py-2 rounded-lg transition
+                          ${isActive 
+                            ? "bg-yellow-500 hover:bg-yellow-400 text-black"
+                            : "bg-gray-600 cursor-not-allowed text-gray-300"}`}
                       >
-                        Check In
+                        {isActive ? "Check In" : "Not Available"}
                       </button>
                     </div>
-                  ))
+                  );
+                })
                 )}
               </div>
             </div>

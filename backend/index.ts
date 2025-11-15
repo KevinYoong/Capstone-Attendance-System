@@ -4,6 +4,8 @@ import mysql, { RowDataPacket } from "mysql2/promise";
 import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from "bcrypt";
+import http from "http";          
+import { Server } from "socket.io"; 
 import studentRoutes from "./src/routes/studentRoutes";
 import lecturerRoutes from "./src/routes/lecturerRoutes";
 
@@ -11,11 +13,28 @@ dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 3001;
+const server = http.createServer(app);
+export const io: Server = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"],
+  },
+});
 
 app.use(cors());
 app.use(express.json());
 app.use("/student", studentRoutes);
 app.use("/lecturer", lecturerRoutes);
+
+// Handle socket connections
+io.on("connection", (socket) => {
+  console.log("🟢 Client connected:", socket.id);
+
+  socket.on("disconnect", () => {
+    console.log("🔴 Client disconnected:", socket.id);
+  });
+});
+
 
 interface LoginRequestBody {
   identifier: string;
@@ -102,6 +121,7 @@ app.post("/login", async (req: Request, res: Response) => {
   }
 });
 
-app.listen(port, () => {
+// Start the combined HTTP + Socket.IO server
+server.listen(port, () => {
   console.log(`✅ Server running on http://localhost:${port}`);
 });
