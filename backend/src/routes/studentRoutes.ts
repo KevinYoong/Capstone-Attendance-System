@@ -2,10 +2,9 @@
 import { Router, Request, Response } from "express";
 import db from "../../db";
 import { RowDataPacket } from "mysql2/promise";
-import { Server as SocketIOServer } from "socket.io";
+import { io } from "../../index";
 
-export default function createStudentRouter(io: SocketIOServer) {
-  const router = Router();
+const router = Router();
 
 interface ClassRow extends RowDataPacket {
   class_id: number;
@@ -74,12 +73,11 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
 });
 
 router.post("/session-started", (req: Request, res: Response) => {
-    const { class_id, started_at, expires_at } = req.body;
+  const { class_id, started_at, expires_at } = req.body;
 
-    io.emit("session_started", { class_id, started_at, expires_at });
+  io.emit("session_started", { class_id, started_at, expires_at });
 
-    res.json({ message: "Event emitted" });
-  });
+  res.json({ message: "Event emitted" });
+});
 
-  return router;
-}
+export default router;
