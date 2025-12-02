@@ -80,4 +80,113 @@ router.post("/session-started", (req: Request, res: Response) => {
   res.json({ message: "Event emitted" });
 });
 
+// TypeScript interfaces for check-in
+interface SessionRow extends RowDataPacket {
+  session_id: number;
+  class_id: number;
+  started_at: Date;
+  expires_at: Date;
+  online_mode: number;
+}
+
+interface CheckinRow extends RowDataPacket {
+  checkin_id: number;
+  session_id: number;
+  student_id: number;
+  checkin_time: Date;
+  status: string;
+}
+
+// POST /student/checkin - Basic check-in endpoint (no geolocation yet)
+router.post("/checkin", async (req: Request, res: Response) => {
+  const { student_id, session_id } = req.body;
+
+  // Validate required fields
+  if (!student_id || !session_id) {
+    return res.status(400).json({
+      success: false,
+      message: "student_id and session_id are required"
+    });
+  }
+
+  try {
+    // 1. Check if session exists and is still valid
+    const [sessionRows] = await db.query<SessionRow[]>(
+      `SELECT session_id, class_id, started_at, expires_at, online_mode
+       FROM Session
+       WHERE session_id = ?`,
+      [session_id]
+    );
+
+    if (sessionRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Session not found"
+      });
+    }
+
+    const session = sessionRows[0];
+
+    // 2. Check if session has expired
+    const now = new Date();
+    const expiresAt = new Date(session.expires_at);
+
+    if (now > expiresAt) {
+      return res.status(400).json({
+        success: false,
+        message: "Session has expired"
+      });
+    }
+
+    // 3. Check if student is already checked in for this session
+    const [existingCheckins] = await db.query<CheckinRow[]>(
+      `SELECT checkin_id
+       FROM Checkin
+       WHERE session_id = ? AND student_id = ?`,
+      [session_id, student_id]
+    );
+
+    if (existingCheckins.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Already checked in for this session"
+      });
+    }
+
+    // 4. Insert check-in record
+    const [result] = await db.query(
+      `INSERT INTO Checkin (session_id, student_id, checkin_time, status)
+       VALUES (?, ?, NOW(), 'present')`,
+      [session_id, student_id]
+    );
+
+    // 5. Emit Socket.IO event for real-time updates
+    io.emit("studentCheckedIn", {
+      class_id: session.class_id,
+      session_id: session_id,
+      student_id: student_id,
+      checkin_time: new Date(),
+      status: "present"
+    });
+
+    // 6. Return success response
+    return res.status(200).json({
+      success: true,
+      message: "Check-in successful",
+      data: {
+        session_id: session_id,
+        student_id: student_id,
+        status: "present"
+      }
+    });
+
+  } catch (error) {
+    console.error("Check-in error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error processing check-in"
+    });
+  }
+});
+
 export default router;
