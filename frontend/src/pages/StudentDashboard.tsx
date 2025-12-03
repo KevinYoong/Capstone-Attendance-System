@@ -43,6 +43,9 @@ export default function StudentDashboard() {
     expiresAt: string;
   }>>({});
 
+  // Track which classes the student has checked into
+  const [checkedInClasses, setCheckedInClasses] = useState<Set<number>>(new Set());
+
   const handleLogout = () => {
     logout();
     navigate('/');
@@ -95,8 +98,31 @@ export default function StudentDashboard() {
     }
   };
 
-  const handleCheckIn = (classId: number) => {
-    alert(`Check-in for class ${classId} clicked!`);
+  const handleCheckIn = async (classId: number) => {
+    if (!user) return;
+
+    const session = activeSessions[classId];
+    if (!session) {
+      alert("No active session for this class");
+      return;
+    }
+
+    try {
+      const response = await axios.post('http://localhost:3001/student/checkin', {
+        student_id: user.id,
+        session_id: session.session_id
+      });
+
+      if (response.data.success) {
+        // Mark this class as checked in
+        setCheckedInClasses(prev => new Set(prev).add(classId));
+        alert("✅ Check-in successful!");
+      }
+    } catch (error: any) {
+      const errorMessage = error.response?.data?.message || "Check-in failed";
+      alert(`❌ ${errorMessage}`);
+      console.error("Check-in error:", error);
+    }
   };
 
   const statusBadge = (status?: string) => {
@@ -162,7 +188,8 @@ export default function StudentDashboard() {
                 ) : (
                   classes.map((cls, idx) => {
                   const isActive = activeSessions[cls.class_id] !== undefined;
-                  
+                  const isCheckedIn = checkedInClasses.has(cls.class_id);
+
                   return (
                     <div
                       key={cls.class_id}
@@ -175,20 +202,24 @@ export default function StudentDashboard() {
                           {cls.class_name} ({cls.course_code})
                         </h3>
                         <p className="text-gray-400">Lecturer: {cls.lecturer_name}</p>
-                        {isActive 
-                          ? <span className="text-yellow-400 font-semibold">🟡 Check-in open</span>
-                          : <span className="text-gray-400 font-semibold">⚪ Pending</span>
+                        {isCheckedIn
+                          ? <span className="text-green-400 font-semibold">🟢 Checked in</span>
+                          : isActive
+                            ? <span className="text-yellow-400 font-semibold">🟡 Check-in open</span>
+                            : <span className="text-gray-400 font-semibold">⚪ Pending</span>
                         }
                       </div>
                       <button
                         onClick={() => handleCheckIn(cls.class_id)}
-                        disabled={!isActive}
+                        disabled={!isActive || isCheckedIn}
                         className={`mt-2 md:mt-0 px-4 py-2 rounded-lg transition
-                          ${isActive 
-                            ? "bg-yellow-500 hover:bg-yellow-400 text-black"
-                            : "bg-gray-600 cursor-not-allowed text-gray-300"}`}
+                          ${isCheckedIn
+                            ? "bg-green-600 cursor-not-allowed text-white"
+                            : isActive
+                              ? "bg-yellow-500 hover:bg-yellow-400 text-black"
+                              : "bg-gray-600 cursor-not-allowed text-gray-300"}`}
                       >
-                        {isActive ? "Check In" : "Not Available"}
+                        {isCheckedIn ? "✓ Checked In" : isActive ? "Check In" : "Not Available"}
                       </button>
                     </div>
                   );
