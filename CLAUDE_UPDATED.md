@@ -632,60 +632,6 @@ const response = await loginUser({
 
 ---
 
-### Styling
-
-**Framework:** TailwindCSS
-**Theme:** Dark mode with gradients
-**Color Palette:**
-- Background: Dark blues/blacks (`bg-gray-900`, `bg-gray-800`)
-- Text: White (`text-white`)
-- Accents: Blue (`bg-blue-600`), Yellow (`bg-yellow-500`), Green (`bg-green-500`), Red (`bg-red-500`)
-
-**No CSS-in-JS libraries used.**
-
----
-
-## Development Workflow
-
-### Running the Application
-
-**Backend:**
-```bash
-cd backend
-npm install
-npm run dev  # Runs tsx watch index.ts
-```
-
-**Frontend:**
-```bash
-cd frontend
-npm install
-npm run dev  # Runs Vite dev server
-```
-
-**Database:**
-- Ensure MySQL server is running
-- Create `.env` file in `/backend` with DB credentials
-- Import schema (if schema file exists) or create tables manually
-
----
-
-### Build & Deployment
-
-**Backend:**
-```bash
-npm run build   # Compiles TypeScript to JavaScript
-npm start       # Runs compiled code
-```
-
-**Frontend:**
-```bash
-npm run build   # Vite production build → /dist
-npm run preview # Preview production build
-```
-
----
-
 ## Current Implementation Status
 
 ### ✅ Completed Features
@@ -719,36 +665,7 @@ npm run preview # Preview production build
 
 ---
 
-### 🚧 Known Issues
-
-1. **studentRoutes.ts Socket.IO Integration Issue**
-   - File: `/backend/src/routes/studentRoutes.ts`
-   - Issue: Route handler exports function that takes `io` parameter but not called with it in `index.ts`
-   - Impact: Socket.IO events in student routes won't work
-   - Fix: Update `index.ts` to pass `io` instance to student routes
-
-2. **Hardcoded Student Statuses**
-   - File: `/frontend/src/pages/LecturerClassDetail.tsx`
-   - Issue: Student statuses hardcoded as "pending" instead of fetching from database
-   - Impact: Check-in status not accurately reflected
-   - Fix: Update `/lecturer/class/:id/details` endpoint to join with Checkin table
-
-3. **Missing Check-in Submission Endpoint**
-   - File: `/backend/src/routes/studentRoutes.ts` (needs to be added)
-   - Issue: Students can see "Check In" button but clicking only shows alert
-   - Impact: Check-in flow incomplete
-   - Fix: Implement `POST /student/checkin` endpoint
-
-4. **No Check-in Expiry Validation**
-   - Files: Backend routes
-   - Issue: System doesn't prevent check-in after 30-minute expiry
-   - Impact: Students can check in at any time
-   - Fix: Add expiry check in check-in submission endpoint
-
----
-
 ## Development Roadmap
-
 ### Phase 1: Complete Core Check-in Flow (Priority 🔴)
 **Goal:** Enable students to actually check in
 
@@ -855,107 +772,6 @@ npm run preview # Preview production build
 9. **Follow TailwindCSS for styling (no inline CSS or CSS-in-JS).**
 10. **Database queries must use parameterized statements to prevent SQL injection.**
 
----
-
-## Common Development Tasks
-
-### Adding a New Backend Endpoint
-
-1. Choose appropriate route file: `studentRoutes.ts` or `lecturerRoutes.ts`
-2. Define TypeScript interface for request/response
-3. Add route handler:
-   ```typescript
-   router.post('/new-endpoint', async (req, res) => {
-     try {
-       const [results] = await db.query('SELECT ...');
-       return res.status(200).json({ success: true, data: results });
-     } catch (error) {
-       return res.status(500).json({ error: 'Error message' });
-     }
-   });
-   ```
-4. Test with Postman/curl
-5. Update this documentation
-
----
-
-### Adding a New Frontend Page
-
-1. Create component in `/frontend/src/pages/`
-2. Use TypeScript + functional component
-3. Add route in `App.tsx`:
-   ```tsx
-   <Route
-     path="/new-page"
-     element={
-       <ProtectedRoute allowedRoles={["student"]}>
-         <NewPage />
-       </ProtectedRoute>
-     }
-   />
-   ```
-4. Style with TailwindCSS
-5. Update this documentation
-
----
-
-### Adding a Socket.IO Event
-
-1. Backend: Emit event in route handler:
-   ```typescript
-   io.emit("newEvent", { data: ... });
-   ```
-2. Frontend: Listen in component:
-   ```typescript
-   useEffect(() => {
-     socket.on("newEvent", (data) => {
-       console.log(data);
-     });
-     return () => socket.off("newEvent");
-   }, []);
-   ```
-3. Document event in this file
-
----
-
-## Testing Credentials (Example)
-
-**Student Login:**
-- Identifier: `student@example.com` or `12345678`
-- Password: (As set in database)
-
-**Lecturer Login:**
-- Identifier: `lecturer@example.com`
-- Password: (As set in database)
-
-**Note:** Create test users in database with bcrypt-hashed passwords.
-
----
-
-## Useful Commands
-
-**Backend Development:**
-```bash
-npm run dev      # Start server with watch mode
-npm run build    # Compile TypeScript
-npm start        # Run compiled code
-```
-
-**Frontend Development:**
-```bash
-npm run dev      # Vite dev server (HMR)
-npm run build    # Production build
-npm run preview  # Preview production build
-npm run lint     # Run ESLint
-```
-
-**Database:**
-```bash
-mysql -u root -p attendance_system  # Connect to database
-```
-
----
-
 ## Environment Variables
 
 **Backend (`.env`):**
@@ -966,63 +782,6 @@ DB_PASSWORD=your_password
 DB_NAME=attendance_system
 PORT=3001
 ```
-
-**Note:** Never commit `.env` file to git.
-
----
-
-## Important File Paths
-
-| Component | Path |
-|-----------|------|
-| Main Server | `/backend/index.ts` |
-| Database Connection | `/backend/db.ts` |
-| Student Routes | `/backend/src/routes/studentRoutes.ts` |
-| Lecturer Routes | `/backend/src/routes/lecturerRoutes.ts` |
-| Main App | `/frontend/src/App.tsx` |
-| Login Form | `/frontend/src/components/LoginForm.tsx` |
-| Student Dashboard | `/frontend/src/pages/StudentDashboard.tsx` |
-| Lecturer Dashboard | `/frontend/src/pages/LecturerDashboard.tsx` |
-| Class Detail | `/frontend/src/pages/LecturerClassDetail.tsx` |
-| Auth Context | `/frontend/src/context/AuthContext.tsx` |
-| API Service | `/frontend/src/services/api.ts` |
-
----
-
-## Troubleshooting
-
-**Frontend won't start:**
-- Check Node version (should be 18+)
-- Run `npm install` in `/frontend`
-- Check for port conflicts (default: 5173)
-
-**Backend won't start:**
-- Check `.env` file exists with correct credentials
-- Verify MySQL server is running
-- Run `npm install` in `/backend`
-- Check for port conflicts (default: 3001)
-
-**Database connection errors:**
-- Verify MySQL credentials in `.env`
-- Check database exists: `CREATE DATABASE attendance_system;`
-- Verify user has permissions
-
-**Socket.IO not working:**
-- Check CORS settings in `backend/index.ts`
-- Verify frontend connects to correct URL (`http://localhost:3001`)
-- Check browser console for WebSocket errors
-
----
-
-## Additional Resources
-
-- **React Router Docs:** https://reactrouter.com/
-- **Socket.IO Docs:** https://socket.io/docs/
-- **TailwindCSS Docs:** https://tailwindcss.com/docs
-- **MySQL2 Docs:** https://github.com/sidorares/node-mysql2
-- **TypeScript Handbook:** https://www.typescriptlang.org/docs/
-
----
 
 **Last Updated:** December 2, 2025
 **Maintained By:** Development Team
