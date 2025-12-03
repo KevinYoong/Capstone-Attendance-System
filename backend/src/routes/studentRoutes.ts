@@ -131,15 +131,23 @@ interface CheckinRow extends RowDataPacket {
   status: string;
 }
 
-// POST /student/checkin - Basic check-in endpoint (no geolocation yet)
+// POST /student/checkin - Check-in endpoint with geolocation validation
 router.post("/checkin", async (req: Request, res: Response) => {
-  const { student_id, session_id } = req.body;
+  const { student_id, session_id, latitude, longitude, accuracy } = req.body;
 
   // Validate required fields
   if (!student_id || !session_id) {
     return res.status(400).json({
       success: false,
       message: "student_id and session_id are required"
+    });
+  }
+
+  // Validate geolocation data
+  if (latitude === undefined || longitude === undefined || accuracy === undefined) {
+    return res.status(400).json({
+      success: false,
+      message: "Geolocation data (latitude, longitude, accuracy) is required"
     });
   }
 
@@ -172,7 +180,40 @@ router.post("/checkin", async (req: Request, res: Response) => {
       });
     }
 
-    // 3. Check if student is already checked in for this session
+    // 3. Geolocation validation (skip if online_mode is enabled)
+    if (session.online_mode === 0) {
+      // Load campus coordinates from environment variables
+      const campusLat = parseFloat(process.env.CAMPUS_LATITUDE || "0");
+      const campusLng = parseFloat(process.env.CAMPUS_LONGITUDE || "0");
+      const campusRadius = parseFloat(process.env.CAMPUS_RADIUS || "500");
+
+      if (campusLat === 0 || campusLng === 0) {
+        return res.status(500).json({
+          success: false,
+          message: "Campus location not configured"
+        });
+      }
+
+      // Calculate distance between student and campus
+      const distance = calculateDistance(latitude, longitude, campusLat, campusLng);
+
+      console.log(`Check-in validation: Student at (${latitude}, ${longitude}), Campus at (${campusLat}, ${campusLng}), Distance: ${distance}m, Accuracy: ${accuracy}m, Allowed radius: ${campusRadius}m`);
+
+      // Reject if student is outside campus radius
+      if (distance > campusRadius) {
+        return res.status(403).json({
+          success: false,
+          message: `You are too far from campus. Distance: ${distance}m (max: ${campusRadius}m)`
+        });
+      }
+
+      // Warn if GPS accuracy is poor (but still allow check-in)
+      if (accuracy > 100) {
+        console.warn(`Warning: Poor GPS accuracy (${accuracy}m) for student ${student_id}`);
+      }
+    }
+
+    // 4. Check if student is already checked in for this session
     const [existingCheckins] = await db.query<CheckinRow[]>(
       `SELECT checkin_id
        FROM Checkin
@@ -187,14 +228,14 @@ router.post("/checkin", async (req: Request, res: Response) => {
       });
     }
 
-    // 4. Insert check-in record
+    // 5. Insert check-in record with geolocation data
     const [result] = await db.query(
-      `INSERT INTO Checkin (session_id, student_id, checkin_time, status)
-       VALUES (?, ?, NOW(), 'present')`,
-      [session_id, student_id]
+      `INSERT INTO Checkin (session_id, student_id, checkin_time, status, student_lat, student_lng, accuracy)
+       VALUES (?, ?, NOW(), 'present', ?, ?, ?)`,
+      [session_id, student_id, latitude, longitude, accuracy]
     );
 
-    // 5. Emit Socket.IO event for real-time updates
+    // 6. Emit Socket.IO event for real-time updates
     io.emit("studentCheckedIn", {
       class_id: session.class_id,
       session_id: session_id,
@@ -203,7 +244,7 @@ router.post("/checkin", async (req: Request, res: Response) => {
       status: "present"
     });
 
-    // 6. Return success response
+    // 7. Return success response
     return res.status(200).json({
       success: true,
       message: "Check-in successful",
