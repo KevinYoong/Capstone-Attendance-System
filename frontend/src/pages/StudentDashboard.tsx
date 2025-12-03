@@ -71,7 +71,7 @@ export default function StudentDashboard() {
       setOpenDays([today]);
     }
 
-    // ----- SOCKET LISTENER -----
+    // ----- SOCKET LISTENERS -----
     socket.on("checkinActivated", (data) => {
       console.log("Activated:", data);
 
@@ -84,8 +84,19 @@ export default function StudentDashboard() {
       }));
     });
 
+    // Listen for when ANY student checks in (including this student)
+    socket.on("studentCheckedIn", (data) => {
+      console.log("Student checked in:", data);
+
+      // If this student checked in, update local state
+      if (data.student_id === user?.id) {
+        setCheckedInClasses(prev => new Set(prev).add(data.class_id));
+      }
+    });
+
     return () => {
       socket.off("checkinActivated");
+      socket.off("studentCheckedIn");
     };
 
   }, [user]);

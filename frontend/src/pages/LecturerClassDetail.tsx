@@ -1,6 +1,9 @@
 import { useNavigate, useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { io } from "socket.io-client";
+
+const socket = io("http://localhost:3001");
 
 interface Student {
   student_id: number;
@@ -60,6 +63,26 @@ export default function LecturerClassDetail() {
     };
     fetchData();
   }, [class_id]);
+
+  // Socket.IO listener for real-time check-in updates
+  useEffect(() => {
+    socket.on("studentCheckedIn", (data) => {
+      console.log("Real-time check-in:", data);
+
+      // Update student status in real-time
+      setStudents((prev) =>
+        prev.map((s) =>
+          s.student_id === data.student_id
+            ? { ...s, status: "checked-in" as const }
+            : s
+        )
+      );
+    });
+
+    return () => {
+      socket.off("studentCheckedIn");
+    };
+  }, []);
 
   const handleActivateCheckIn = async () => {
     try {
