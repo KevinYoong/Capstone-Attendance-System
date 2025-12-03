@@ -118,22 +118,62 @@ export default function StudentDashboard() {
       return;
     }
 
-    try {
-      const response = await axios.post('http://localhost:3001/student/checkin', {
-        student_id: user.id,
-        session_id: session.session_id
-      });
-
-      if (response.data.success) {
-        // Mark this class as checked in
-        setCheckedInClasses(prev => new Set(prev).add(classId));
-        alert("✅ Check-in successful!");
-      }
-    } catch (error: any) {
-      const errorMessage = error.response?.data?.message || "Check-in failed";
-      alert(`❌ ${errorMessage}`);
-      console.error("Check-in error:", error);
+    // Request geolocation from browser
+    if (!navigator.geolocation) {
+      alert("❌ Geolocation is not supported by your browser");
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        // Successfully got location
+        const { latitude, longitude, accuracy } = position.coords;
+
+        try {
+          const response = await axios.post('http://localhost:3001/student/checkin', {
+            student_id: user.id,
+            session_id: session.session_id,
+            latitude: latitude,
+            longitude: longitude,
+            accuracy: accuracy
+          });
+
+          if (response.data.success) {
+            // Mark this class as checked in
+            setCheckedInClasses(prev => new Set(prev).add(classId));
+            alert("✅ Check-in successful!");
+          }
+        } catch (error: any) {
+          const errorMessage = error.response?.data?.message || "Check-in failed";
+          alert(`❌ ${errorMessage}`);
+          console.error("Check-in error:", error);
+        }
+      },
+      (error) => {
+        // Failed to get location
+        let errorMessage = "Unable to retrieve your location";
+
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = "Location permission denied. Please enable location access in your browser settings.";
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = "Location information is unavailable. Please try again.";
+            break;
+          case error.TIMEOUT:
+            errorMessage = "Location request timed out. Please try again.";
+            break;
+        }
+
+        alert(`❌ ${errorMessage}`);
+        console.error("Geolocation error:", error);
+      },
+      {
+        enableHighAccuracy: true, // Request GPS if available
+        timeout: 10000, // 10 second timeout
+        maximumAge: 0 // Don't use cached position
+      }
+    );
   };
 
   const statusBadge = (status?: string) => {
