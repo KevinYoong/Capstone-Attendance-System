@@ -42,9 +42,16 @@ export default function LecturerClassDetail() {
         );
         setClassInfo(res.data.classInfo);
         setSession(res.data.session);
+
+        // Map students with their actual check-in status
+        const checkins = res.data.checkins || [];
+        const checkinMap = new Map(
+          checkins.map((c: any) => [c.student_id, c.status])
+        );
+
         setStudents(res.data.students.map((s: any) => ({
           ...s,
-          status: "pending", // for now everyone is pending
+          status: checkinMap.has(s.student_id) ? "checked-in" : "pending",
         })));
         setLoading(false);
       } catch (err) {
@@ -71,9 +78,16 @@ export default function LecturerClassDetail() {
       const studentsRes = await axios.get(
         `http://localhost:3001/lecturer/class/${class_id}/details`
       );
+
+      // Map students with their actual check-in status
+      const checkins = studentsRes.data.checkins || [];
+      const checkinMap = new Map(
+        checkins.map((c: any) => [c.student_id, c.status])
+      );
+
       setStudents(studentsRes.data.students.map((s: any) => ({
         ...s,
-        status: "pending",
+        status: checkinMap.has(s.student_id) ? "checked-in" : "pending",
       })));
     } catch (err) {
       console.error(err);
