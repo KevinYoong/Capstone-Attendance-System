@@ -132,7 +132,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
   try {
     const startedAt = new Date();
-    const expiresAt = new Date(startedAt.getTime() + 30 * 60000);
+    const expiresAt = new Date(startedAt.getTime() + 2 * 60000);
 
     const [result] = await db.query(
       `INSERT INTO Session (class_id, started_at, expires_at, online_mode) VALUES (?, ?, ?, ?)`,

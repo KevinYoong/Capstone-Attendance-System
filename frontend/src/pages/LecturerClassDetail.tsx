@@ -92,9 +92,9 @@ export default function LecturerClassDetail() {
 
       // Update session in frontend
       setSession({
-        session_id: res.data.sessionId,
-        started_at: new Date().toISOString(),
-        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        session_id: res.data.session_id,      
+        started_at: res.data.started_at,      
+        expires_at: res.data.expires_at,      
       });
 
       // Refresh student list (optional)
