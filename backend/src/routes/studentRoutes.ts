@@ -3,6 +3,7 @@ import { Router, Request, Response } from "express";
 import db from "../../db";
 import { RowDataPacket } from "mysql2/promise";
 import { io } from "../../index";
+import { calculateCurrentWeek } from "../utils/semesterUtils";
 
 const router = Router();
 
@@ -23,8 +24,7 @@ interface ClassRow extends RowDataPacket {
 interface SemesterRow extends RowDataPacket {
   semester_id: number;
   name: string;
-  current_week: number;
-  is_sem_break: number; // MySQL BOOLEAN returns 0 or 1
+  start_date: string;
 }
 
 // Week record type
@@ -49,7 +49,7 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
   try {
     // 1. Get active semester info
     const [semesterRows] = await db.query<SemesterRow[]>(
-      `SELECT semester_id, name, current_week, is_sem_break
+      `SELECT semester_id, name, start_date
        FROM Semester
        WHERE status = 'active'
        LIMIT 1`
@@ -63,7 +63,10 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
     }
 
     const semester = semesterRows[0];
-    const requestedWeek = weekParam ? parseInt(weekParam) : semester.current_week;
+
+    // Calculate current week from dates (automatic)
+    const weekInfo = calculateCurrentWeek(semester.start_date);
+    const requestedWeek = weekParam ? parseInt(weekParam) : weekInfo.current_week;
 
     // Validate week number
     if (requestedWeek < 1 || requestedWeek > 14) {
@@ -74,8 +77,8 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
     }
 
     // 2. Check if the requested week is during semester break
-    // Sem break occurs when viewing any week while is_sem_break is true
-    const isSemBreak = semester.is_sem_break === 1;
+    // Sem break occurs between weeks 7 and 8 (calculated from dates)
+    const isSemBreak = weekInfo.is_sem_break;
 
     // 3. Fetch classes for the student (filtered by semester and week range)
     const [rows] = await db.query<ClassRow[]>(
@@ -126,8 +129,8 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
       semester: {
         semester_id: semester.semester_id,
         name: semester.name,
-        current_week: semester.current_week,
-        is_sem_break: isSemBreak
+        current_week: weekInfo.current_week, // Calculated from dates
+        is_sem_break: weekInfo.is_sem_break // Calculated from dates
       },
       week_number: requestedWeek,
       is_viewing_sem_break: isSemBreak,
