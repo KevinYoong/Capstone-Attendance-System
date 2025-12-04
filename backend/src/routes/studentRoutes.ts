@@ -2,7 +2,6 @@ import { Router, Request, Response } from "express";
 import db from "../../db";
 import { RowDataPacket } from "mysql2/promise";
 import { io } from "../../index";
-import { calculateCurrentWeek } from "../utils/semesterUtils";
 
 const router = Router();
 
@@ -15,15 +14,6 @@ interface ClassRow extends RowDataPacket {
   end_time: string;
   class_type: "Lecture" | "Tutorial";
   lecturer_name: string;
-  semester_id: number;
-  start_week: number;
-  end_week: number;
-}
-
-interface SemesterRow extends RowDataPacket {
-  semester_id: number;
-  name: string;
-  start_date: string;
 }
 
 // Week record type
@@ -35,51 +25,13 @@ type Week = {
   Friday: ClassRow[];
 };
 
-/**
- * GET /student/:student_id/classes/week?week=X
- * Get student's weekly class schedule for a specific week
- * Query params:
- *   - week (optional): Week number (1-14). Defaults to current semester week.
- */
 router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
   const { student_id } = req.params;
-  const weekParam = req.query.week as string | undefined;
+  const { week } = req.query; // Accept week parameter (optional for now)
 
   try {
-    // 1. Get active semester info
-    const [semesterRows] = await db.query<SemesterRow[]>(
-      `SELECT semester_id, name, start_date
-       FROM Semester
-       WHERE status = 'active'
-       LIMIT 1`
-    );
-
-    if (semesterRows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No active semester found"
-      });
-    }
-
-    const semester = semesterRows[0];
-
-    // Calculate current week from dates (automatic)
-    const weekInfo = calculateCurrentWeek(semester.start_date);
-    const requestedWeek = weekParam ? parseInt(weekParam) : weekInfo.current_week;
-
-    // Validate week number
-    if (requestedWeek < 1 || requestedWeek > 14) {
-      return res.status(400).json({
-        success: false,
-        message: "Week must be between 1 and 14"
-      });
-    }
-
-    // 2. Check if the requested week is during semester break
-    // Sem break occurs between weeks 7 and 8 (calculated from dates)
-    const isSemBreak = weekInfo.is_sem_break;
-
-    // 3. Fetch classes for the student (filtered by semester and week range)
+    // Note: week parameter accepted but not used for filtering since all classes are standard (1-14)
+    // Can be used in future for classes with specific start_week/end_week
     const [rows] = await db.query<ClassRow[]>(
       `
       SELECT
@@ -90,58 +42,35 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
         Class.start_time,
         Class.end_time,
         Class.class_type,
-        Class.semester_id,
-        Class.start_week,
-        Class.end_week,
         Lecturer.name AS lecturer_name
       FROM StudentClass
       JOIN Class ON StudentClass.class_id = Class.class_id
       JOIN Lecturer ON Class.lecturer_id = Lecturer.lecturer_id
       WHERE StudentClass.student_id = ?
-        AND Class.semester_id = ?
-        AND Class.start_week <= ?
-        AND Class.end_week >= ?
       ORDER BY FIELD(day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday'), start_time;
     `,
-      [student_id, semester.semester_id, requestedWeek, requestedWeek]
+      [student_id]
     );
 
-    const week: Week = {
-      Monday: [],
-      Tuesday: [],
-      Wednesday: [],
-      Thursday: [],
-      Friday: [],
+    const week: Week = { 
+      Monday: [], 
+      Tuesday: [], 
+      Wednesday: [], 
+      Thursday: [], 
+      Friday: [], 
     };
 
-    // If it's semester break, return empty schedule with metadata
-    if (!isSemBreak) {
-      rows.forEach((cls) => {
-        const day = cls.day_of_week as keyof Week;
-        week[day].push(cls);
-      });
-    }
-
-    // Return schedule with metadata
-    res.json({
-      success: true,
-      semester: {
-        semester_id: semester.semester_id,
-        name: semester.name,
-        current_week: weekInfo.current_week, // Calculated from dates
-        is_sem_break: weekInfo.is_sem_break // Calculated from dates
-      },
-      week_number: requestedWeek,
-      is_viewing_sem_break: isSemBreak,
-      schedule: week
+    rows.forEach((cls) => {
+      // cls.day_of_week is strongly typed to the union above
+      const day = cls.day_of_week as keyof Week;
+      // push into the correct array
+      week[day].push(cls);
     });
 
+    res.json(week);
   } catch (error) {
     console.error(error);
-    res.status(500).json({
-      success: false,
-      message: "Error retrieving class schedule"
-    });
+    res.status(500).json({ message: "Error retrieving class schedule" });
   }
 });
 
