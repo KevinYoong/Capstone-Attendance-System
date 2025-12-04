@@ -154,6 +154,18 @@ export default function StudentDashboard() {
   useEffect(() => {
     if (!user || !semester) return;
 
+    // If viewing semester break, show empty schedule
+    if (isViewingSemBreak) {
+      setWeekSchedule({
+        Monday: [],
+        Tuesday: [],
+        Wednesday: [],
+        Thursday: [],
+        Friday: [],
+      });
+      return;
+    }
+
     const fetchSchedule = async () => {
       try {
         const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week?week=${selectedWeek}`);
@@ -178,7 +190,7 @@ export default function StudentDashboard() {
     };
 
     fetchSchedule();
-  }, [selectedWeek, user, semester]);
+  }, [selectedWeek, user, semester, isViewingSemBreak]);
 
   const toggleDay = (day: string) => {
     if (openDays.includes(day)) {
