@@ -87,9 +87,25 @@ export default function StudentDashboard() {
     const fetchSchedule = async () => {
       try {
         const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week`);
-        setWeekSchedule(res.data);
+        // Ensure all days are arrays (handle API errors gracefully)
+        const schedule: Week = {
+          Monday: Array.isArray(res.data.Monday) ? res.data.Monday : [],
+          Tuesday: Array.isArray(res.data.Tuesday) ? res.data.Tuesday : [],
+          Wednesday: Array.isArray(res.data.Wednesday) ? res.data.Wednesday : [],
+          Thursday: Array.isArray(res.data.Thursday) ? res.data.Thursday : [],
+          Friday: Array.isArray(res.data.Friday) ? res.data.Friday : [],
+        };
+        setWeekSchedule(schedule);
       } catch (err) {
         console.error('Error fetching schedule:', err);
+        // Set empty schedule on error
+        setWeekSchedule({
+          Monday: [],
+          Tuesday: [],
+          Wednesday: [],
+          Thursday: [],
+          Friday: [],
+        });
       }
     };
 
