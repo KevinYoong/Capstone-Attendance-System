@@ -8,6 +8,7 @@ import http from "http";
 import { Server } from "socket.io"; 
 import studentRoutes from "./src/routes/studentRoutes";
 import lecturerRoutes from "./src/routes/lecturerRoutes";
+import semesterRoutes from "./src/routes/semesterRoutes";
 
 dotenv.config();
 
@@ -25,6 +26,7 @@ app.use(cors());
 app.use(express.json());
 app.use("/student", studentRoutes);
 app.use("/lecturer", lecturerRoutes);
+app.use("/semester", semesterRoutes);
 
 // Handle socket connections
 io.on("connection", (socket) => {
