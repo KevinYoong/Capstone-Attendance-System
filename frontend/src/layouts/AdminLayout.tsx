@@ -1,0 +1,26 @@
+import { ReactNode } from "react";
+import AdminSidebar from "../components/AdminSidebar";
+import { useAuth } from "../context/AuthContext";
+import { Navigate } from "react-router-dom";
+
+interface LayoutProps {
+  children: ReactNode;
+}
+
+export default function AdminLayout({ children }: LayoutProps) {
+  const { user } = useAuth();
+
+  if (!user || user.role !== "admin") {
+    return <Navigate to="/" replace />;
+  }
+
+  return (
+    <div className="flex bg-[#0a0f1f] text-white min-h-screen">
+      <AdminSidebar />
+
+      <div className="flex-1 p-8 overflow-y-auto bg-gradient-to-br from-[#0a0f1f] via-[#0d1b2a] to-[#051923]">
+        {children}
+      </div>
+    </div>
+  );
+}
