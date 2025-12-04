@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import db from "../../db";
 import { RowDataPacket } from "mysql2/promise";
+import { calculateCurrentWeek } from "../utils/semesterUtils";
 
 const router = Router();
 
@@ -49,14 +50,16 @@ router.get("/current", async (req: Request, res: Response) => {
 
     const semester = rows[0];
 
-    // Convert is_sem_break from tinyint (0/1) to boolean
+    // Calculate current week from dates (automatic)
+    const weekInfo = calculateCurrentWeek(semester.start_date);
+
     const semesterData = {
       semester_id: semester.semester_id,
       name: semester.name,
       start_date: semester.start_date,
       end_date: semester.end_date,
-      current_week: semester.current_week,
-      is_sem_break: semester.is_sem_break === 1, // Convert 0/1 to boolean
+      current_week: weekInfo.current_week, // Calculated from dates
+      is_sem_break: weekInfo.is_sem_break, // Calculated from dates
       status: semester.status
     };
 
@@ -105,13 +108,16 @@ router.get("/:semester_id", async (req: Request, res: Response) => {
 
     const semester = rows[0];
 
+    // Calculate current week from dates (automatic)
+    const weekInfo = calculateCurrentWeek(semester.start_date);
+
     const semesterData = {
       semester_id: semester.semester_id,
       name: semester.name,
       start_date: semester.start_date,
       end_date: semester.end_date,
-      current_week: semester.current_week,
-      is_sem_break: semester.is_sem_break === 1, // Convert 0/1 to boolean
+      current_week: weekInfo.current_week, // Calculated from dates
+      is_sem_break: weekInfo.is_sem_break, // Calculated from dates
       status: semester.status
     };
 
