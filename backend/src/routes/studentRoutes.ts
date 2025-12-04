@@ -15,6 +15,16 @@ interface ClassRow extends RowDataPacket {
   end_time: string;
   class_type: "Lecture" | "Tutorial";
   lecturer_name: string;
+  semester_id: number;
+  start_week: number;
+  end_week: number;
+}
+
+interface SemesterRow extends RowDataPacket {
+  semester_id: number;
+  name: string;
+  current_week: number;
+  is_sem_break: number; // MySQL BOOLEAN returns 0 or 1
 }
 
 // Week record type
@@ -26,13 +36,51 @@ type Week = {
   Friday: ClassRow[];
 };
 
+/**
+ * GET /student/:student_id/classes/week?week=X
+ * Get student's weekly class schedule for a specific week
+ * Query params:
+ *   - week (optional): Week number (1-14). Defaults to current semester week.
+ */
 router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
   const { student_id } = req.params;
+  const weekParam = req.query.week as string | undefined;
 
   try {
+    // 1. Get active semester info
+    const [semesterRows] = await db.query<SemesterRow[]>(
+      `SELECT semester_id, name, current_week, is_sem_break
+       FROM Semester
+       WHERE status = 'active'
+       LIMIT 1`
+    );
+
+    if (semesterRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No active semester found"
+      });
+    }
+
+    const semester = semesterRows[0];
+    const requestedWeek = weekParam ? parseInt(weekParam) : semester.current_week;
+
+    // Validate week number
+    if (requestedWeek < 1 || requestedWeek > 14) {
+      return res.status(400).json({
+        success: false,
+        message: "Week must be between 1 and 14"
+      });
+    }
+
+    // 2. Check if the requested week is during semester break
+    // Sem break occurs when viewing any week while is_sem_break is true
+    const isSemBreak = semester.is_sem_break === 1;
+
+    // 3. Fetch classes for the student (filtered by semester and week range)
     const [rows] = await db.query<ClassRow[]>(
       `
-      SELECT 
+      SELECT
         Class.class_id,
         Class.class_name,
         Class.course_code,
@@ -40,35 +88,58 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
         Class.start_time,
         Class.end_time,
         Class.class_type,
+        Class.semester_id,
+        Class.start_week,
+        Class.end_week,
         Lecturer.name AS lecturer_name
       FROM StudentClass
       JOIN Class ON StudentClass.class_id = Class.class_id
       JOIN Lecturer ON Class.lecturer_id = Lecturer.lecturer_id
       WHERE StudentClass.student_id = ?
+        AND Class.semester_id = ?
+        AND Class.start_week <= ?
+        AND Class.end_week >= ?
       ORDER BY FIELD(day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday'), start_time;
     `,
-      [student_id]
+      [student_id, semester.semester_id, requestedWeek, requestedWeek]
     );
 
-    const week: Week = { 
-      Monday: [], 
-      Tuesday: [], 
-      Wednesday: [], 
-      Thursday: [], 
-      Friday: [], 
+    const week: Week = {
+      Monday: [],
+      Tuesday: [],
+      Wednesday: [],
+      Thursday: [],
+      Friday: [],
     };
 
-    rows.forEach((cls) => {
-      // cls.day_of_week is strongly typed to the union above
-      const day = cls.day_of_week as keyof Week;
-      // push into the correct array
-      week[day].push(cls);
+    // If it's semester break, return empty schedule with metadata
+    if (!isSemBreak) {
+      rows.forEach((cls) => {
+        const day = cls.day_of_week as keyof Week;
+        week[day].push(cls);
+      });
+    }
+
+    // Return schedule with metadata
+    res.json({
+      success: true,
+      semester: {
+        semester_id: semester.semester_id,
+        name: semester.name,
+        current_week: semester.current_week,
+        is_sem_break: isSemBreak
+      },
+      week_number: requestedWeek,
+      is_viewing_sem_break: isSemBreak,
+      schedule: week
     });
 
-    res.json(week);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: "Error retrieving class schedule" });
+    res.status(500).json({
+      success: false,
+      message: "Error retrieving class schedule"
+    });
   }
 });
 
