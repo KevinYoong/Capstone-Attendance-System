@@ -84,9 +84,10 @@ export default function StudentDashboard() {
       }
     };
 
-    const fetchSchedule = async () => {
+    const fetchSchedule = async (week?: number) => {
       try {
-        const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week`);
+        const weekParam = week || selectedWeek;
+        const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week?week=${weekParam}`);
         // Ensure all days are arrays (handle API errors gracefully)
         const schedule: Week = {
           Monday: Array.isArray(res.data.Monday) ? res.data.Monday : [],
@@ -148,6 +149,36 @@ export default function StudentDashboard() {
 
   }, [user]);
 
+  // Refetch schedule when selectedWeek changes
+  useEffect(() => {
+    if (!user || !semester) return;
+
+    const fetchSchedule = async () => {
+      try {
+        const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week?week=${selectedWeek}`);
+        const schedule: Week = {
+          Monday: Array.isArray(res.data.Monday) ? res.data.Monday : [],
+          Tuesday: Array.isArray(res.data.Tuesday) ? res.data.Tuesday : [],
+          Wednesday: Array.isArray(res.data.Wednesday) ? res.data.Wednesday : [],
+          Thursday: Array.isArray(res.data.Thursday) ? res.data.Thursday : [],
+          Friday: Array.isArray(res.data.Friday) ? res.data.Friday : [],
+        };
+        setWeekSchedule(schedule);
+      } catch (err) {
+        console.error('Error fetching schedule:', err);
+        setWeekSchedule({
+          Monday: [],
+          Tuesday: [],
+          Wednesday: [],
+          Thursday: [],
+          Friday: [],
+        });
+      }
+    };
+
+    fetchSchedule();
+  }, [selectedWeek, user, semester]);
+
   const toggleDay = (day: string) => {
     if (openDays.includes(day)) {
       setOpenDays(openDays.filter(d => d !== day));
@@ -163,7 +194,7 @@ export default function StudentDashboard() {
   };
 
   const handleNextWeek = () => {
-    if (semester && selectedWeek < semester.current_week) {
+    if (selectedWeek < 14) {
       setSelectedWeek(selectedWeek + 1);
     }
   };
@@ -172,6 +203,22 @@ export default function StudentDashboard() {
     if (semester) {
       setSelectedWeek(semester.current_week);
     }
+  };
+
+  // Helper function to calculate the date for a given day in the selected week
+  const getDateForDay = (dayName: string): string => {
+    if (!semester) return '';
+
+    const dayIndex = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 }[dayName] || 0;
+    const semesterStart = new Date(semester.start_date);
+
+    // Calculate days offset: (selectedWeek - 1) * 7 days + dayIndex
+    const daysOffset = (selectedWeek - 1) * 7 + dayIndex;
+    const targetDate = new Date(semesterStart);
+    targetDate.setDate(semesterStart.getDate() + daysOffset);
+
+    // Format as "Jan 6"
+    return targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   };
 
   const handleCheckIn = async (classId: number) => {
@@ -291,7 +338,7 @@ export default function StudentDashboard() {
                     <span className="text-orange-400 font-semibold">🏖️ Semester Break</span>
                   ) : (
                     <span>
-                      Week <span className="font-bold text-white">{selectedWeek}</span> of {semester.current_week}
+                      Week <span className="font-bold text-white">{selectedWeek}</span> of 14
                     </span>
                   )}
                 </p>
@@ -324,9 +371,9 @@ export default function StudentDashboard() {
 
                 <button
                   onClick={handleNextWeek}
-                  disabled={selectedWeek >= semester.current_week}
+                  disabled={selectedWeek >= 14}
                   className={`px-4 py-2 rounded-lg font-semibold transition ${
-                    selectedWeek >= semester.current_week
+                    selectedWeek >= 14
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-blue-600 hover:bg-blue-500 text-white'
                   }`}
@@ -352,6 +399,13 @@ export default function StudentDashboard() {
                 </p>
               </div>
             )}
+            {selectedWeek > semester.current_week && (
+              <div className="mt-4 pt-4 border-t border-blue-500/20">
+                <p className="text-sm text-blue-400 font-semibold">
+                  🔮 You are viewing a future week
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           <div className="bg-[#181818]/80 backdrop-blur-xl p-6 rounded-2xl border border-red-500/20 mb-6">
@@ -374,7 +428,7 @@ export default function StudentDashboard() {
                   boxShadow: '0 2px 6px rgba(255, 255, 255, 0.05), 0 0 10px rgba(255, 255, 255, 0.05)',
                 }}
               >
-                {day}
+                {day} {semester && `(${getDateForDay(day)})`}
               </button>
 
               {/* Classes */}
