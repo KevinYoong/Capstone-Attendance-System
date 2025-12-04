@@ -48,6 +48,7 @@ export default function LecturerDashboard() {
   const [semester, setSemester] = useState<Semester | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
   const [loadingSemester, setLoadingSemester] = useState<boolean>(true);
+  const [isViewingSemBreak, setIsViewingSemBreak] = useState<boolean>(false);
 
   const handleLogout = () => {
     logout();
@@ -144,19 +145,34 @@ export default function LecturerDashboard() {
   };
 
   const handlePreviousWeek = () => {
-    if (selectedWeek > 1) {
+    if (isViewingSemBreak) {
+      // Going back from semester break to Week 7
+      setIsViewingSemBreak(false);
+      setSelectedWeek(7);
+    } else if (selectedWeek === 8) {
+      // Going back from Week 8 to semester break
+      setIsViewingSemBreak(true);
+    } else if (selectedWeek > 1) {
       setSelectedWeek(selectedWeek - 1);
     }
   };
 
   const handleNextWeek = () => {
-    if (selectedWeek < 14) {
+    if (isViewingSemBreak) {
+      // Going forward from semester break to Week 8
+      setIsViewingSemBreak(false);
+      setSelectedWeek(8);
+    } else if (selectedWeek === 7) {
+      // Going forward from Week 7 to semester break
+      setIsViewingSemBreak(true);
+    } else if (selectedWeek < 14) {
       setSelectedWeek(selectedWeek + 1);
     }
   };
 
   const handleCurrentWeek = () => {
     if (semester) {
+      setIsViewingSemBreak(false);
       setSelectedWeek(semester.current_week);
     }
   };
@@ -214,8 +230,8 @@ export default function LecturerDashboard() {
               <div>
                 <h2 className="text-2xl font-bold text-blue-400 mb-1">{semester.name}</h2>
                 <p className="text-gray-300">
-                  {semester.is_sem_break ? (
-                    <span className="text-orange-400 font-semibold">🏖️ Semester Break</span>
+                  {isViewingSemBreak ? (
+                    <span className="text-orange-400 font-semibold text-xl">🏖️ Semester Break</span>
                   ) : (
                     <span>
                       Week <span className="font-bold text-white">{selectedWeek}</span> of 14
@@ -228,9 +244,9 @@ export default function LecturerDashboard() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={handlePreviousWeek}
-                  disabled={selectedWeek <= 1}
+                  disabled={!isViewingSemBreak && selectedWeek <= 1}
                   className={`px-4 py-2 rounded-lg font-semibold transition ${
-                    selectedWeek <= 1
+                    !isViewingSemBreak && selectedWeek <= 1
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-blue-600 hover:bg-blue-500 text-white'
                   }`}
@@ -239,7 +255,7 @@ export default function LecturerDashboard() {
                   ← Previous
                 </button>
 
-                {selectedWeek !== semester.current_week && (
+                {(selectedWeek !== semester.current_week || isViewingSemBreak) && (
                   <button
                     onClick={handleCurrentWeek}
                     className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-semibold transition"
@@ -251,9 +267,9 @@ export default function LecturerDashboard() {
 
                 <button
                   onClick={handleNextWeek}
-                  disabled={selectedWeek >= 14}
+                  disabled={!isViewingSemBreak && selectedWeek >= 14}
                   className={`px-4 py-2 rounded-lg font-semibold transition ${
-                    selectedWeek >= 14
+                    !isViewingSemBreak && selectedWeek >= 14
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-blue-600 hover:bg-blue-500 text-white'
                   }`}
@@ -265,26 +281,39 @@ export default function LecturerDashboard() {
             </div>
 
             {/* Week Status Indicator */}
-            {selectedWeek === semester.current_week && (
-              <div className="mt-4 pt-4 border-t border-blue-500/20">
-                <p className="text-sm text-green-400 font-semibold">
-                  ✓ You are viewing the current week
+            {isViewingSemBreak ? (
+              <div className="mt-4 pt-4 border-t border-orange-500/20">
+                <p className="text-sm text-orange-400 font-semibold">
+                  🏖️ Semester break period - No classes scheduled
+                </p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Located between Week 7 and Week 8
                 </p>
               </div>
-            )}
-            {selectedWeek < semester.current_week && (
-              <div className="mt-4 pt-4 border-t border-blue-500/20">
-                <p className="text-sm text-yellow-400 font-semibold">
-                  ⚠️ You are viewing a past week
-                </p>
-              </div>
-            )}
-            {selectedWeek > semester.current_week && (
-              <div className="mt-4 pt-4 border-t border-blue-500/20">
-                <p className="text-sm text-blue-400 font-semibold">
-                  🔮 You are viewing a future week
-                </p>
-              </div>
+            ) : (
+              <>
+                {selectedWeek === semester.current_week && (
+                  <div className="mt-4 pt-4 border-t border-blue-500/20">
+                    <p className="text-sm text-green-400 font-semibold">
+                      ✓ You are viewing the current week
+                    </p>
+                  </div>
+                )}
+                {selectedWeek < semester.current_week && (
+                  <div className="mt-4 pt-4 border-t border-blue-500/20">
+                    <p className="text-sm text-yellow-400 font-semibold">
+                      ⚠️ You are viewing a past week
+                    </p>
+                  </div>
+                )}
+                {selectedWeek > semester.current_week && (
+                  <div className="mt-4 pt-4 border-t border-blue-500/20">
+                    <p className="text-sm text-blue-400 font-semibold">
+                      🔮 You are viewing a future week
+                    </p>
+                  </div>
+                )}
+              </>
             )}
           </div>
         ) : (
