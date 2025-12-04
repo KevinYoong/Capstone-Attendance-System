@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import StudentDashboard from "./pages/StudentDashboard";
 import LecturerDashboard from "./pages/LecturerDashboard";
+import AdminDashboard from "./pages/AdminDashboard";
 import LecturerClassDetail from "./pages/LecturerClassDetail";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
@@ -29,6 +30,16 @@ export default function App() {
             element={
               <ProtectedRoute allowedRoles={["lecturer"]}>
                 <LecturerDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Admin Only */}
+          <Route
+            path="/admin"
+            element={
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <AdminDashboard />
               </ProtectedRoute>
             }
           />

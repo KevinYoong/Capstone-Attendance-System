@@ -9,6 +9,7 @@ import { Server } from "socket.io";
 import studentRoutes from "./src/routes/studentRoutes";
 import lecturerRoutes from "./src/routes/lecturerRoutes";
 import semesterRoutes from "./src/routes/semesterRoutes";
+import adminRoutes from "./src/routes/adminRoutes";
 
 dotenv.config();
 
@@ -27,6 +28,7 @@ app.use(express.json());
 app.use("/student", studentRoutes);
 app.use("/lecturer", lecturerRoutes);
 app.use("/semester", semesterRoutes);
+app.use("/admin", adminRoutes); // Placeholder for future admin routes
 
 // Handle socket connections
 io.on("connection", (socket) => {
@@ -69,36 +71,56 @@ app.post("/login", async (req: Request, res: Response) => {
   try {
     const isEmail = identifier.includes("@");
     let user: User | undefined;
-    let role: 'student' | 'lecturer' | undefined;
+    let role: 'student' | 'lecturer' | 'admin' | undefined;
 
+    // Admin login check
     if (isEmail) {
-      const [studentMatch] = await db.query<(Student & RowDataPacket)[]>(
-        "SELECT * FROM Student WHERE email = ?",
+      const [adminMatch] = await db.query<any[]>(
+        "SELECT * FROM Admin WHERE email = ?",
         [identifier]
       );
 
-      if (studentMatch.length > 0) {
-        user = studentMatch[0];
-        role = "student";
-      } else {
-        const [lecturerMatch] = await db.query<(Lecturer & RowDataPacket)[]>(
-          "SELECT * FROM Lecturer WHERE email = ?",
+      if (adminMatch.length > 0) {
+        user = adminMatch[0];
+        role = "admin";
+      }
+    }
+
+    // Student login check
+    if (!user) {
+      if (isEmail) {
+        const [studentMatch] = await db.query<(Student & RowDataPacket)[]>(
+          "SELECT * FROM Student WHERE email = ?",
           [identifier]
         );
-        if (lecturerMatch.length > 0) {
-          user = lecturerMatch[0];
-          role = "lecturer";
+
+        if (studentMatch.length > 0) {
+          user = studentMatch[0];
+          role = "student";
+        }
+      } else {
+        const [studentMatch] = await db.query<(Student & RowDataPacket)[]>(
+          "SELECT * FROM Student WHERE student_id = ?",
+          [identifier]
+        );
+
+        if (studentMatch.length > 0) {
+          user = studentMatch[0];
+          role = "student";
         }
       }
-    } else {
-      const [studentMatch] = await db.query<(Student & RowDataPacket)[]>(
-        "SELECT * FROM Student WHERE student_id = ?",
+    }
+
+    // Lecturer login check
+    if (!user && isEmail) {
+      const [lecturerMatch] = await db.query<(Lecturer & RowDataPacket)[]>(
+        "SELECT * FROM Lecturer WHERE email = ?",
         [identifier]
       );
 
-      if (studentMatch.length > 0) {
-        user = studentMatch[0];
-        role = "student";
+      if (lecturerMatch.length > 0) {
+        user = lecturerMatch[0];
+        role = "lecturer";
       }
     }
 
@@ -110,7 +132,12 @@ app.post("/login", async (req: Request, res: Response) => {
     res.status(200).json({
       message: "Login successful.",
       user: {
-        id: role === "student" ? (user as Student).student_id : (user as Lecturer).lecturer_id,
+        id:
+          role === "student"
+            ? (user as Student).student_id
+            : role === "lecturer"
+            ? (user as Lecturer).lecturer_id
+            : user.admin_id, 
         name: user.name,
         email: user.email,
         role,
