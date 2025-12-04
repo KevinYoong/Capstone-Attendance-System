@@ -6,13 +6,14 @@ import { RowDataPacket } from "mysql2/promise";
 const router = Router();
 
 // TypeScript interface for Semester
+// Note: MySQL returns BOOLEAN as TINYINT (0 or 1)
 interface SemesterRow extends RowDataPacket {
   semester_id: number;
   name: string;
   start_date: string;
   end_date: string;
   current_week: number;
-  is_sem_break: boolean;
+  is_sem_break: number; // MySQL BOOLEAN returns 0 or 1
   status: "active" | "inactive";
   created_at: Date;
   updated_at: Date;
@@ -56,7 +57,7 @@ router.get("/current", async (req: Request, res: Response) => {
       start_date: semester.start_date,
       end_date: semester.end_date,
       current_week: semester.current_week,
-      is_sem_break: semester.is_sem_break === true || semester.is_sem_break === 1,
+      is_sem_break: semester.is_sem_break === 1, // Convert 0/1 to boolean
       status: semester.status
     };
 
@@ -111,7 +112,7 @@ router.get("/:semester_id", async (req: Request, res: Response) => {
       start_date: semester.start_date,
       end_date: semester.end_date,
       current_week: semester.current_week,
-      is_sem_break: semester.is_sem_break === true || semester.is_sem_break === 1,
+      is_sem_break: semester.is_sem_break === 1, // Convert 0/1 to boolean
       status: semester.status
     };
 
