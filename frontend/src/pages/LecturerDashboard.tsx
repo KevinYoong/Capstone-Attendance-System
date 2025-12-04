@@ -77,7 +77,7 @@ export default function LecturerDashboard() {
       try {
         const weekParam = week || selectedWeek;
         const res = await axios.get<Week>(
-          `http://localhost:3001/lecturer/${user.id}/classes/week?week=${weekParam}`
+          `http://localhost:3001/lecturer/${user.id}/classes/week?week=${isViewingSemBreak ? "break" : weekParam}`
         );
         // Ensure all days are arrays (handle API errors gracefully)
         const schedule: Week = {
@@ -116,7 +116,9 @@ export default function LecturerDashboard() {
 
     const fetchSchedule = async () => {
       try {
-        const res = await axios.get<Week>(`http://localhost:3001/lecturer/${user.id}/classes/week?week=${selectedWeek}`);
+        const res = await axios.get<Week>(
+          `http://localhost:3001/lecturer/${user.id}/classes/week?week=${isViewingSemBreak ? "break" : selectedWeek}`
+        );
         const schedule: Week = {
           Monday: Array.isArray(res.data.Monday) ? res.data.Monday : [],
           Tuesday: Array.isArray(res.data.Tuesday) ? res.data.Tuesday : [],
@@ -138,7 +140,7 @@ export default function LecturerDashboard() {
     };
 
     fetchSchedule();
-  }, [selectedWeek, user, semester]);
+  }, [selectedWeek, user, semester, isViewingSemBreak]);
 
   const toggleDay = (day: string) => {
     setOpenDays(openDays.includes(day) ? openDays.filter(d => d !== day) : [...openDays, day]);

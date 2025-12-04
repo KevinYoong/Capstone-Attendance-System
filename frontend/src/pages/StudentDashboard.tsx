@@ -88,7 +88,7 @@ export default function StudentDashboard() {
     const fetchSchedule = async (week?: number) => {
       try {
         const weekParam = week || selectedWeek;
-        const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week?week=${weekParam}`);
+        const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week?week=${isViewingSemBreak ? "break" : weekParam}`);
         // Ensure all days are arrays (handle API errors gracefully)
         const schedule: Week = {
           Monday: Array.isArray(res.data.Monday) ? res.data.Monday : [],
@@ -156,7 +156,7 @@ export default function StudentDashboard() {
 
     const fetchSchedule = async () => {
       try {
-        const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week?week=${selectedWeek}`);
+        const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week?week=${isViewingSemBreak ? "break" : selectedWeek}`);
         const schedule: Week = {
           Monday: Array.isArray(res.data.Monday) ? res.data.Monday : [],
           Tuesday: Array.isArray(res.data.Tuesday) ? res.data.Tuesday : [],
@@ -178,7 +178,7 @@ export default function StudentDashboard() {
     };
 
     fetchSchedule();
-  }, [selectedWeek, user, semester]);
+  }, [selectedWeek, user, semester, isViewingSemBreak]);
 
   const toggleDay = (day: string) => {
     if (openDays.includes(day)) {

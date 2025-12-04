@@ -44,6 +44,17 @@ interface SessionRow extends RowDataPacket {
 router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => {
   const { lecturer_id } = req.params;
   const { week } = req.query; // Accept week parameter (optional for now)
+  const selectedWeek = req.query.week;
+
+  if (selectedWeek === "break") {
+    return res.json({
+      Monday: [],
+      Tuesday: [],
+      Wednesday: [],
+      Thursday: [],
+      Friday: []
+    });
+  }
 
   try {
     // Note: week parameter accepted but not used for filtering since all classes are standard (1-14)
