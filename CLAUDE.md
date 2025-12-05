@@ -1,140 +1,208 @@
-# CLAUDE.md  
-Guidance file for AI coding assistants working on this repository.
+1. 🚀 Project Overview
+This is a full-stack attendance tracking system with Students, Lecturers, and Admins, featuring:
+- Weekly class schedules
+- Real-time check-in sessions using Socket.IO
+- Geolocation check-in validation
+- Semester + Week navigation with semester break support
+- Admin portal (UI complete, backend next)
+- Class, student, lecturer management
+- Upcoming analytics, QR check-in, and JWT auth
 
----
+2. 🎯 Current Progress (Phase-by-Phase)
+✅ Phase 1 — Core Check-in Flow
+- Socket.IO real-time server
+- Lecturer activates session
+- Students receive live activation
+- Real-time class status updates
 
-## Project Overview
+✅ Phase 2 — Geolocation Verification
+- Haversine formula
+- GPS accuracy
+- Campus radius validation
+- Online mode bypass option
 
-This is a **Capstone Attendance System**: a full-stack geolocation-based attendance tracking app with separate interfaces for students and lecturers.
+✅ Phase 3 — Semester System
+- Semester table
+- Automatic week calculation
+- Week 1–7 → Break → Week 8–14
+- Frontend week navigation
+- Filtering classes by week
+- Empty schedule during break
 
-The system verifies attendance based on **location**, optionally via **QR scan → auto-check-in**, and tracks class history and attendance analytics.
+✅ Phase 4 — Admin Portal (Frontend)
+Admin UI is complete for:
+- Sidebar (collapsible)
+- Students page (search, pagination, edit, delete, reset password modal)
+- Lecturers page (search, pagination, edit, delete, reset password modal)
+- Classes page (create, edit inline, delete, assign lecturer, manage week ranges)
+⚠️ Admin pages currently use mock data — backend CRUD not implemented yet.
 
-### Current Status (as of now)
-- ✅ Database schema created (MySQL)
-- ✅ Backend Express server running with `/login` endpoint
-- ✅ Login UI implemented in React + Tailwind
-- ✅ Students can log in via student_id **or** email
-- ✅ Lecturers log in via email only
-- ⏳ Frontend and backend are **not yet connected**
-- ⏳ No dashboard or routing yet
+🔜 Phase 5 — Admin Backend CRUD (NEXT)
+Estimated Time: 5-7 days
+Tasks:
+    CRUD Students
+        Create student (form: name, email, student_id, password)
+        Edit student (update details)
+        Delete student (with confirmation)
+        View all students (table with search/filter)
+    CRUD Lecturers
+        Create lecturer (form: name, email, password)
+        Edit lecturer
+        Delete lecturer
+        View all lecturers (table)
+    CRUD Classes
+        Create class (name, course_code, day, time, type, lecturer, semester, weeks)
+        Edit class (reassign lecturer, change schedule)
+        Delete class
+        View all classes (table, filter by semester)
+    Assign Students to Classes
+        View class details page
+        See enrolled students (table)
+        Add students (multi-select dropdown)
+        Remove students from class
 
----
+New Routes:
+    Students: GET/POST/PUT/DELETE /admin/students
+    Lecturers: GET/POST/PUT/DELETE /admin/lecturers
+    Classes: GET/POST/PUT/DELETE /admin/classes
+    Assignments: POST/DELETE /admin/classes/:id/students
 
-## Tech Stack
+🚧 Phase 6: Auto Session Expiry (NOT STARTED)
+Estimated Time: 1-2 days
+Tasks:
+    Backend: Background job to check expired sessions
+    Socket.IO: Emit 'sessionExpired' event when session expires
+    Frontend: StudentDashboard listens for sessionExpired
+    Frontend: Update UI (yellow → red) when session expires
+    Integration testing
 
-| Layer | Technology |
-|------|------------|
-| **Frontend** | React 19 + Vite, TailwindCSS |
-| **Backend** | Node.js (Express) |
-| **Database** | MySQL (`mysql2/promise`) |
-| **Auth** | bcrypt (password hashing), JWT planned |
-| **Build & Dev** | Vite HMR, npm scripts |
+New Features:
+    Automatic session expiry detection (no page refresh)
+    Visual feedback when time runs out
 
----
+🚧 Phase 7: Attendance Analytics (NOT STARTED)
+Estimated Time: 3-4 days
+Tasks:
+    Lecturer Analytics
+        View attendance history by class
+        Filter by week/date range
+        Export to CSV
+        Show attendance percentage per class
 
-## Folder Structure
+    Student Analytics
+        View personal attendance percentage (per class)
+        Show missed classes
+        Attendance streak tracker
+        Weekly attendance summary
 
-attendance_system/
-│
-├── backend/
-│ ├── index.js # Express server
-│ ├── .env # DB credentials (not committed)
-│ └── package.json
-│
-├── frontend/
-│ ├── src/
-│ │ ├── pages/ # Page components (LoginPage, Dashboard, etc.)
-│ │ ├── components/ # Reusable components (LoginForm)
-│ │ ├── App.jsx
-│ │ └── main.jsx
-│ ├── index.html
-│ └── package.json
-│
-└── CLAUDE.md # THIS FILE
+New Routes:
+    GET /lecturer/:id/analytics
+    GET /student/:id/analytics
+    GET /lecturer/:id/classes/:class_id/attendance?week=X
+
+4. Folder Structure 
+backend/
+  index.ts              # Server, /login, Socket.IO
+  db.ts                 # MySQL pool
+  src/routes/
+    studentRoutes.ts
+    lecturerRoutes.ts
+    semesterRoutes.ts
+    adminRoutes.ts      # Placeholder (CRUD coming next)
+  src/utils/
+    semesterUtils.ts
+
+frontend/
+  src/context/AuthContext.tsx     # Student/Lecturer/Admin
+  src/App.tsx                     # Routing with role protection
+  src/components/
+    ProtectedRoute.tsx
+    LoginForm.tsx
+    AdminSidebar.tsx
+  src/pages/
+    LoginPage.tsx
+    StudentDashboard.tsx
+    LecturerDashboard.tsx
+    LecturerClassDetail.tsx
+    admin/
+      AdminDashboard.tsx
+      AdminStudents.tsx
+      AdminLecturers.tsx
+      AdminClasses.tsx
+      AdminSemesters.tsx
+
+5. 🔐 Roles & Authentication Rules
+Student
+- Login: ID or email
+- Role: "student"
+- Dashboard: /student
+
+Lecturer
+- Login: email only
+- Role: "lecturer"
+- Dashboard: /lecturer
+
+Admin
+- Login: email only
+- Role: "admin"
+- Dashboard: /admin
+- Full CRUD access
+
+All stored in:
+AuthContext.tsx → user.role = "student" | "lecturer" | "admin"
+
+6. Database Schema (Key Fields)
+Student
+(student_id PK, name, email, password, phone_number)
+
+Lecturer
+(lecturer_id PK, name, email, password)
+
+Class
+(class_id PK, name, code, day_of_week, start_time, end_time, class_type, lecturer_id, semester_id, start_week, end_week)
+
+StudentClass
+(student_id, class_id)
+
+Session
+(session_id PK, class_id, started_at, expires_at, online_mode)
+
+Checkin
+(checkin_id PK, session_id, student_id, student_lat, student_lng, accuracy, status)
+
+Admin
+(admin_id, name, email, password)
 
 
----
+7. 🔌 Key Backend Endpoints
+/login
+Handles student/lecturer/admin:
+- Detects email or student ID
+- bcrypt.compare
+- Returns { id, name, email, role }
 
-## Authentication Rules
+/student/...
+Weekly schedule, check-in endpoint (implemented).
 
-| User Type | Login Identifier | Allowed? | Notes |
-|----------|----------------|---------|------|
-| Student | **Email** | ✅ |
-| Student | **Student ID (numeric)** | ✅ |
-| Lecturer | **Email** | ✅ |
-| Lecturer | Numeric ID login | ❌ Prevented intentionally |
+/lecturer/...
+Weekly schedule, class detail, activate check-in.
 
-Passwords are **bcrypt-hashed**, never stored in plain text.
+/semester/current
+Returns active semester + current week.
 
----
+/admin/...
+⚠️ CRUD endpoints NOT IMPLEMENTED YET → next task.
 
-## Backend Notes (Express API)
 
-### Base URL
-
-http://localhost:3001
-
-### Existing Endpoints
-| Method | Route | Purpose |
-|--------|--------|---------|
-| GET | `/test_db` | Verify DB connection |
-| POST | `/login` | Authenticate student/lecturer |
-
-### Planned Backend Endpoints
-| Increment | Feature | Routes To Implement |
-|----------|---------|--------------------|
-| Increment 1 | Student check-in + session handling | `POST /sessions/start`, `POST /checkin` |
-| Increment 2 | Geolocation enforcement | Validate coordinates in `POST /checkin` |
-| Increment 3 | Online mode toggle | `PATCH /sessions/:id/toggle-online` |
-| Increment 4 | Lecturer attendance history | `GET /sessions/:id/attendance`, `GET /lecturer/:id/sessions` |
-| Increment 5 | Student dashboard & analytics | `GET /student/:id/stats` |
-
-We will later introduce:
-- JWT token issuance at `/login`
-- `Authorization: Bearer <token>` middleware
-
----
-
-## Frontend Notes (React + Tailwind)
-
-### Current Pages
-| Page | File | State |
-|------|------|-------|
-| Login Page | `src/pages/LoginPage.jsx` | ✅ Done |
-
-### Planned Pages (Upcoming)
-| Page | Purpose |
-|------|---------|
-| Student Dashboard | Show joined classes & check-in button |
-| Lecturer Dashboard | Start/end class sessions, view attendees |
-| Class Attendance View | View attendance logs |
-| Setup Page (optional) | Lecturer creates classes, add students |
-
-### Planned UI Enhancements
-- QR Code scanner page (mobile optimized)
-- Geolocation permission request UI
-- Toast / Snackbar notifications for feedback
-
----
-
-## Development Roadmap (Increments)
-
-| Increment | Feature | Status | Expected Output |
-|----------|---------|--------|----------------|
-| 1 | Replace Code-Based Check-In with **One-Click Check-In + QR Shortcut** | ⏳ Pending | `checkin` route, start session UI |
-| 2 | **Geolocation Verification** | ⏳ Pending | GPS accuracy & distance threshold logic |
-| 3 | **Online Mode Switch** (no geolocation required) | ⏳ Pending | Toggle UI + backend route |
-| 4 | **Lecturer Attendance History View** | ⏳ Pending | Dashboard page + API routes |
-| 5 | **Student Attendance Analytics Dashboard** | ⏳ Pending | Charts (attendance % per class) |
-
----
-
-## Key Rules AI Assistants Should Follow
-
-1. **Do not rewrite working code unless necessary.**
-2. **Frontend must use functional components + hooks.**
-3. **Backend must use async/await with `db.query()`.**
-4. **NEVER store raw passwords. Always hash using bcrypt.**
-5. If creating a new backend route → follow existing file structure and response format:
-   ```js
-   return res.status(200).json({ success: true, data: ... });
+8. Rules for Any AI Working on This Repo
+- Do NOT rewrite entire files unless necessary.
+- Changes must be compatible with existing frontend structure, especially Typescript interfaces.
+- Backend responses must follow this format:
+   - { "success": true, "data": ... }
+- Never store raw passwords. Always bcrypt.hash().
+- All class filtering must respect semester week + break.
+- All admin CRUD must update all dependent tables (e.g., deleting student removes them from StudentClass).
+- Use parameterized SQL queries (no raw string interpolation).
+- Frontend must use React Hooks + TailwindCSS consistent with existing theme.
+- Ensure new endpoints are registered in index.ts under /admin.
+- Maintain Socket.IO event consistency (io.emit() only from server routes).
