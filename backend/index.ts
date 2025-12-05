@@ -4,12 +4,14 @@ import mysql, { RowDataPacket } from "mysql2/promise";
 import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
 import http from "http";          
 import { Server } from "socket.io"; 
 import studentRoutes from "./src/routes/studentRoutes";
 import lecturerRoutes from "./src/routes/lecturerRoutes";
 import semesterRoutes from "./src/routes/semesterRoutes";
 import adminRoutes from "./src/routes/adminRoutes";
+import { verifyAdmin } from "./src/middleware/verifyAdmin";
 
 dotenv.config();
 
@@ -28,7 +30,7 @@ app.use(express.json());
 app.use("/student", studentRoutes);
 app.use("/lecturer", lecturerRoutes);
 app.use("/semester", semesterRoutes);
-app.use("/admin", adminRoutes); // Placeholder for future admin routes
+app.use("/admin", verifyAdmin, adminRoutes); 
 
 // Handle socket connections
 io.on("connection", (socket) => {
@@ -63,7 +65,27 @@ interface Lecturer extends RowDataPacket {
   created_at: string;
 }
 
-type User = Student | Lecturer;
+interface Admin extends RowDataPacket {
+  admin_id: number;
+  name: string;
+  email: string;
+  password: string;
+}
+
+type User = Student | Lecturer | Admin;
+
+app.post("/create-admin", async (req: Request, res: Response) => {
+  const { name, email, password } = req.body;
+
+  const hashed = await bcrypt.hash(password, 10);
+
+  await db.query(
+    "INSERT INTO Admin (name, email, password) VALUES (?, ?, ?)",
+    [name, email, hashed]
+  );
+
+  res.json({ success: true, message: "Admin created" });
+});
 
 app.post("/login", async (req: Request, res: Response) => {
   const { identifier, password } = req.body as LoginRequestBody;
@@ -71,11 +93,11 @@ app.post("/login", async (req: Request, res: Response) => {
   try {
     const isEmail = identifier.includes("@");
     let user: User | undefined;
-    let role: 'student' | 'lecturer' | 'admin' | undefined;
+    let role: "student" | "lecturer" | "admin" | undefined;
 
-    // Admin login check
+    // Admin login
     if (isEmail) {
-      const [adminMatch] = await db.query<any[]>(
+      const [adminMatch] = await db.query<Admin[]>(
         "SELECT * FROM Admin WHERE email = ?",
         [identifier]
       );
@@ -86,24 +108,22 @@ app.post("/login", async (req: Request, res: Response) => {
       }
     }
 
-    // Student login check
+    // Student login
     if (!user) {
       if (isEmail) {
-        const [studentMatch] = await db.query<(Student & RowDataPacket)[]>(
+        const [studentMatch] = await db.query<Student[]>(
           "SELECT * FROM Student WHERE email = ?",
           [identifier]
         );
-
         if (studentMatch.length > 0) {
           user = studentMatch[0];
           role = "student";
         }
       } else {
-        const [studentMatch] = await db.query<(Student & RowDataPacket)[]>(
+        const [studentMatch] = await db.query<Student[]>(
           "SELECT * FROM Student WHERE student_id = ?",
           [identifier]
         );
-
         if (studentMatch.length > 0) {
           user = studentMatch[0];
           role = "student";
@@ -111,33 +131,55 @@ app.post("/login", async (req: Request, res: Response) => {
       }
     }
 
-    // Lecturer login check
+    // Lecturer login
     if (!user && isEmail) {
-      const [lecturerMatch] = await db.query<(Lecturer & RowDataPacket)[]>(
+      const [lecturerMatch] = await db.query<Lecturer[]>(
         "SELECT * FROM Lecturer WHERE email = ?",
         [identifier]
       );
-
       if (lecturerMatch.length > 0) {
         user = lecturerMatch[0];
         role = "lecturer";
       }
     }
 
-    if (!user) return res.status(401).json({ message: "User not found." });
+    if (!user) {
+      return res.status(401).json({ message: "User not found." });
+    }
 
     const passwordMatch = await bcrypt.compare(password, user.password);
-    if (!passwordMatch) return res.status(401).json({ message: "Incorrect password." });
+    if (!passwordMatch) {
+      return res.status(401).json({ message: "Incorrect password." });
+    }
 
-    res.status(200).json({
+    // === ADMIN LOGIN WITH JWT ===
+    if (role === "admin") {
+      const token = jwt.sign(
+        { id: (user as Admin).admin_id, role: "admin" },
+        process.env.JWT_SECRET as string,
+        { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }
+      );
+
+      return res.status(200).json({
+        message: "Login successful.",
+        user: {
+          id: (user as Admin).admin_id,
+          name: user.name,
+          email: user.email,
+          role,
+        },
+        token,
+      });
+    }
+
+    // === NORMAL LOGIN FOR STUDENT / LECTURER ===
+    return res.status(200).json({
       message: "Login successful.",
       user: {
         id:
           role === "student"
             ? (user as Student).student_id
-            : role === "lecturer"
-            ? (user as Lecturer).lecturer_id
-            : user.admin_id, 
+            : (user as Lecturer).lecturer_id,
         name: user.name,
         email: user.email,
         role,
@@ -146,7 +188,7 @@ app.post("/login", async (req: Request, res: Response) => {
 
   } catch (err) {
     console.error("Login error:", err);
-    res.status(500).json({ message: "Server error", error: err });
+    return res.status(500).json({ message: "Server error", error: err });
   }
 });
 
