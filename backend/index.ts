@@ -196,3 +196,62 @@ app.post("/login", async (req: Request, res: Response) => {
 server.listen(port, () => {
   console.log(`✅ Server running on http://localhost:${port}`);
 });
+
+/* ==============================================
+   PHASE 6: AUTO SESSION EXPIRY BACKGROUND JOB
+   ============================================== */
+
+/**
+ * Background job to check for expired sessions and emit Socket.IO events
+ * Runs every 15 seconds to detect sessions that have expired
+ */
+const SESSION_EXPIRY_CHECK_INTERVAL = 15000; // 15 seconds
+const processedExpiredSessions = new Set<number>(); // Track already-processed sessions
+
+setInterval(async () => {
+  try {
+    // Query for sessions that have expired but haven't been processed yet
+    const [expiredSessions] = await db.query<any[]>(
+      `SELECT session_id, class_id, expires_at
+       FROM Session
+       WHERE expires_at < NOW()
+       ORDER BY expires_at DESC
+       LIMIT 50`
+    );
+
+    for (const session of expiredSessions) {
+      // Skip if we've already emitted this session expiry
+      if (processedExpiredSessions.has(session.session_id)) {
+        continue;
+      }
+
+      // Emit Socket.IO event to notify all connected clients
+      io.emit("sessionExpired", {
+        class_id: session.class_id,
+        session_id: session.session_id,
+        expired_at: session.expires_at
+      });
+
+      // Mark as processed so we don't emit again
+      processedExpiredSessions.add(session.session_id);
+
+      console.log(`🔴 Session ${session.session_id} (Class ${session.class_id}) expired - event emitted`);
+    }
+
+    // Cleanup: Remove sessions older than 1 hour from processed set to prevent memory leak
+    const oneHourAgo = Date.now() - (60 * 60 * 1000);
+    const [oldSessions] = await db.query<any[]>(
+      `SELECT session_id FROM Session WHERE expires_at < FROM_UNIXTIME(?)`,
+      [oneHourAgo / 1000]
+    );
+
+    const oldSessionIds = new Set(oldSessions.map(s => s.session_id));
+    for (const sid of processedExpiredSessions) {
+      if (oldSessionIds.has(sid)) {
+        processedExpiredSessions.delete(sid);
+      }
+    }
+  } catch (err) {
+    console.error("❌ Error in session expiry background job:", err);
+  }
+}, SESSION_EXPIRY_CHECK_INTERVAL);

@@ -56,6 +56,9 @@ export default function StudentDashboard() {
   // Track which classes the student has checked into
   const [checkedInClasses, setCheckedInClasses] = useState<Set<number>>(new Set());
 
+  // PHASE 6: Track which sessions were missed (expired without check-in)
+  const [missedSessions, setMissedSessions] = useState<Set<number>>(new Set());
+
   // Semester and week navigation state
   const [semester, setSemester] = useState<Semester | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
@@ -143,9 +146,31 @@ export default function StudentDashboard() {
       }
     });
 
+    // PHASE 6: Listen for session expiry (automatic yellow → red transition)
+    socket.on("sessionExpired", (data) => {
+      console.log("🔴 Session expired:", data);
+
+      // Check if student checked in for this session
+      const wasCheckedIn = checkedInClasses.has(data.class_id);
+
+      // If student didn't check in, mark as missed
+      if (!wasCheckedIn) {
+        setMissedSessions((prev) => new Set(prev).add(data.class_id));
+        console.log(`❌ Missed session for class ${data.class_id}`);
+      }
+
+      // Remove from active sessions (yellow → red/grey transition)
+      setActiveSessions((prev) => {
+        const updated = { ...prev };
+        delete updated[data.class_id];
+        return updated;
+      });
+    });
+
     return () => {
       socket.off("checkinActivated");
       socket.off("studentCheckedIn");
+      socket.off("sessionExpired");
     };
 
   }, [user]);
@@ -472,6 +497,7 @@ export default function StudentDashboard() {
                   classes.map((cls, idx) => {
                   const isActive = activeSessions[cls.class_id] !== undefined;
                   const isCheckedIn = checkedInClasses.has(cls.class_id);
+                  const isMissed = missedSessions.has(cls.class_id); // PHASE 6: Check if missed
 
                   return (
                     <div
@@ -487,9 +513,11 @@ export default function StudentDashboard() {
                         <p className="text-gray-400">Lecturer: {cls.lecturer_name}</p>
                         {isCheckedIn
                           ? <span className="text-green-400 font-semibold">🟢 Checked in</span>
-                          : isActive
-                            ? <span className="text-yellow-400 font-semibold">🟡 Check-in open</span>
-                            : <span className="text-gray-400 font-semibold">⚪ Pending</span>
+                          : isMissed
+                            ? <span className="text-red-500 font-semibold">🔴 Missed</span>
+                            : isActive
+                              ? <span className="text-yellow-400 font-semibold">🟡 Check-in open</span>
+                              : <span className="text-gray-400 font-semibold">⚪ Pending</span>
                         }
                       </div>
                       <button
