@@ -153,7 +153,7 @@ AuthContext.tsx → user.role = "student" | "lecturer" | "admin"
 
 6. Database Schema (Key Fields)
 Student
-(student_id PK, name, email, password, phone_number)
+(student_id PK, name, email, password)
 
 Lecturer
 (lecturer_id PK, name, email, password)

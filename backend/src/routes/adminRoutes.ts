@@ -336,14 +336,42 @@ router.delete("/students/:id", async (req: Request, res: Response) => {
   }
 });
 
-// --- Additions to backend/src/routes/adminRoutes.ts ---
-// Place these below the Student CRUD code (same file)
+/**
+ * POST /admin/students/:id/reset-password
+ * Body: { password }
+ * Admin resets student password
+ */
+router.post("/students/:id/reset-password", async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id;
+    const { password } = req.body;
 
-// Required imports at top of file (if not already present)
-// import express, { Request, Response } from "express";
-// import db from "../../db";
-// import bcrypt from "bcrypt";
-// import type { PoolConnection } from "mysql2/promise";
+    if (!isValid8DigitId(id)) {
+      return res.status(400).json({ success: false, error: "student_id must be 8 digits" });
+    }
+
+    if (!password) {
+      return res.status(400).json({ success: false, error: "Password is required" });
+    }
+
+    const hashed = await bcrypt.hash(password, SALT_ROUNDS);
+
+    const [result] = await db.query<any>(
+      `UPDATE Student SET password = ? WHERE student_id = ?`,
+      [hashed, Number(id)]
+    );
+
+    // MySQL driver returns OkPacket — check affected rows
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, error: "Student not found" });
+    }
+
+    return res.json({ success: true, message: "Password updated successfully" });
+  } catch (err) {
+    console.error("POST /admin/students/:id/reset-password error:", err);
+    return res.status(500).json({ success: false, error: "Server error" });
+  }
+});
 
 const VALID_DAYS = ["Monday","Tuesday","Wednesday","Thursday","Friday"] as const;
 type DayOfWeek = typeof VALID_DAYS[number];
@@ -571,6 +599,52 @@ router.delete("/lecturers/:id", async (req: Request, res: Response) => {
     }
     console.error("DELETE /admin/lecturers/:id error:", err);
     res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+/**
+ * POST /admin/lecturers/:id/reset-password
+ * Body: { password }
+ * Admin resets lecturer password
+ */
+router.post("/lecturers/:id/reset-password", async (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const { password } = req.body;
+
+    if (!Number.isInteger(id)) {
+      return res.status(400).json({ success: false, error: "Invalid lecturer_id" });
+    }
+
+    if (!password) {
+      return res.status(400).json({ success: false, error: "Password is required" });
+    }
+
+    // Ensure lecturer exists
+    const [existRows] = await db.query<any[]>(
+      "SELECT lecturer_id FROM Lecturer WHERE lecturer_id = ? LIMIT 1",
+      [id]
+    );
+    if (!existRows || existRows.length === 0) {
+      return res.status(404).json({ success: false, error: "Lecturer not found" });
+    }
+
+    // Hash new password
+    const hashed = await bcrypt.hash(password, SALT_ROUNDS);
+
+    // Update in database
+    await db.query(
+      "UPDATE Lecturer SET password = ? WHERE lecturer_id = ?",
+      [hashed, id]
+    );
+
+    return res.json({
+      success: true,
+      message: "Lecturer password updated successfully",
+    });
+  } catch (err) {
+    console.error("POST /admin/lecturers/:id/reset-password error:", err);
+    return res.status(500).json({ success: false, error: "Server error" });
   }
 });
 
@@ -999,6 +1073,120 @@ router.delete("/classes/:id/students/:student_id", async (req: Request, res: Res
     res.json({ success: true, data: { message: "Student removed from class" } });
   } catch (err) {
     console.error("DELETE /admin/classes/:id/students/:student_id error:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+/* -----------------------------
+   SEMESTER ADMIN ROUTES
+   ----------------------------- */
+
+import { calculateCurrentWeek } from "../utils/semesterUtils";
+
+/**
+ * GET /admin/semesters
+ * Returns all semesters (admin view)
+ */
+router.get("/semesters", async (req: Request, res: Response) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT
+        semester_id,
+        name,
+        start_date,
+        end_date,
+        status,
+        created_at,
+        updated_at
+       FROM Semester
+       ORDER BY semester_id DESC`
+    );
+
+    res.json({ success: true, data: rows });
+  } catch (err) {
+    console.error("GET /admin/semesters:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+/**
+ * POST /admin/semesters
+ * Body: { name, start_date, end_date }
+ */
+router.post("/semesters", async (req: Request, res: Response) => {
+  try {
+    const { name, start_date, end_date } = req.body;
+
+    if (!name || !start_date || !end_date) {
+      return res.status(400).json({ success: false, error: "Missing required fields" });
+    }
+
+    await db.query(
+      `INSERT INTO Semester (name, start_date, end_date, status)
+       VALUES (?, ?, ?, 'inactive')`,
+      [name, start_date, end_date]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("POST /admin/semesters:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+/**
+ * PUT /admin/semesters/:id
+ * Update semester name or dates
+ */
+router.put("/semesters/:id", async (req: Request, res: Response) => {
+  try {
+    const { name, start_date, end_date } = req.body;
+    const id = req.params.id;
+
+    await db.query(
+      `UPDATE Semester
+         SET name = ?, start_date = ?, end_date = ?
+       WHERE semester_id = ?`,
+      [name, start_date, end_date, id]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("PUT /admin/semesters/:id:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+/**
+ * DELETE /admin/semesters/:id
+ */
+router.delete("/semesters/:id", async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id;
+
+    await db.query(`DELETE FROM Semester WHERE semester_id = ?`, [id]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("DELETE /admin/semesters/:id:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+/**
+ * PATCH /admin/semesters/:id/activate
+ * Sets all semesters to inactive, then activates the selected semester
+ */
+router.patch("/semesters/:id/activate", async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id;
+
+    await db.query(`UPDATE Semester SET status = 'inactive'`);
+    await db.query(`UPDATE Semester SET status = 'active' WHERE semester_id = ?`, [id]);
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("PATCH /admin/semesters/:id/activate:", err);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });

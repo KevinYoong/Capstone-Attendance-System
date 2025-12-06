@@ -1,6 +1,5 @@
-// src/pages/admin/AdminLecturers.tsx
 import { useEffect, useMemo, useState } from "react";
-import axios from "axios";
+import adminApi from "../../utils/adminApi";
 import {
   UserPlus,
   Edit,
@@ -56,51 +55,20 @@ export default function AdminLecturers() {
   });
 
   useEffect(() => {
-    // FETCH LECTURERS (mock for now)
     async function fetchLecturers() {
-      setLoading(true);
-      try {
-        // TODO: replace with real API call:
-        // const res = await axios.get("/admin/lecturers");
-        // setLecturers(res.data.data);
-
-        // Mock data so UI works before backend
-        const mock: Lecturer[] = [
-          {
-            lecturer_id: 1,
-            name: "Dr. Ahmad Ali",
-            email: "ahmad.ali@university.edu",
-            classes_assigned: [
-              { class_id: 101, class_name: "Software Engineering", course_code: "CS301" },
-              { class_id: 102, class_name: "Operating Systems", course_code: "CS305" },
-            ],
-          },
-          {
-            lecturer_id: 2,
-            name: "Prof. Lim Wei Cheng",
-            email: "limwc@university.edu",
-            classes_assigned: [
-              { class_id: 201, class_name: "Database Systems", course_code: "CS310" },
-            ],
-          },
-          {
-            lecturer_id: 3,
-            name: "Ms. Sara Tan",
-            email: "sara.tan@university.edu",
-            classes_assigned: [],
-          },
-        ];
-
-        setLecturers(mock);
-      } catch (err) {
+        setLoading(true);
+        try {
+        const res = await adminApi.get("/admin/lecturers");
+        setLecturers(res.data.data.lecturers || []);
+        } catch (err) {
         console.error("Error loading lecturers", err);
-      } finally {
+        alert("Failed to load lecturers");
+        } finally {
         setLoading(false);
-      }
+        }
     }
-
     fetchLecturers();
-  }, []);
+  }, []); 
 
   // Filtered + searched list
   const filtered = useMemo(() => {
@@ -151,66 +119,81 @@ export default function AdminLecturers() {
     setShowDeleteModal(true);
   };
 
-  // ---------- TODO: Replace mock actions with real API calls ----------
   const handleCreate = async () => {
     try {
-      // TODO: axios.post("/admin/lecturers", { name: form.name, email: form.email, password: form.password })
-      // For now: append mock lecturer with a fake id
-      const newId = (lecturers[lecturers.length - 1]?.lecturer_id || 0) + 1;
-      const newL: Lecturer = {
-        lecturer_id: newId,
+        const payload = {
         name: form.name,
         email: form.email,
-        classes_assigned: [],
-      };
-      setLecturers((p) => [newL, ...p]);
-      setShowCreateModal(false);
+        password: form.password,
+        };
+
+        const res = await adminApi.post("/admin/lecturers", payload);
+
+        // Append new lecturer to the list
+        setLecturers((prev) => [res.data.data, ...prev]);
+
+        setShowCreateModal(false);
     } catch (err) {
-      console.error("Create error", err);
+        console.error("Create error", err);
+        alert("Failed to create lecturer");
     }
   };
 
   const handleEdit = async () => {
     try {
-      if (!selectedLecturer) return;
-      // TODO: axios.put(`/admin/lecturers/${selectedLecturer.lecturer_id}`, { name: form.name })
-      setLecturers((prev) =>
+        if (!selectedLecturer) return;
+
+        const payload = { name: form.name };
+
+        const res = await adminApi.put(`/admin/lecturers/${selectedLecturer.lecturer_id}`, payload);
+
+        // update frontend state
+        setLecturers((prev) =>
         prev.map((l) =>
-          l.lecturer_id === selectedLecturer.lecturer_id
-            ? { ...l, name: form.name }
-            : l
+            l.lecturer_id === selectedLecturer.lecturer_id ? res.data.data : l
         )
-      );
-      setShowEditModal(false);
-      setSelectedLecturer(null);
+        );
+
+        setShowEditModal(false);
+        setSelectedLecturer(null);
     } catch (err) {
-      console.error("Edit error", err);
+        console.error("Edit error", err);
+        alert("Failed to update lecturer");
     }
   };
 
   const handleResetPassword = async () => {
     try {
-      if (!selectedLecturer) return;
-      // TODO: axios.post(`/admin/lecturers/${selectedLecturer.lecturer_id}/reset-password`, { password: form.password })
-      // Show success feedback (not implemented)
-      setShowResetModal(false);
-      setSelectedLecturer(null);
-      setForm({ name: "", email: "", password: "" });
+        if (!selectedLecturer) return;
+
+        const payload = { password: form.password };
+
+        await adminApi.post(`/admin/lecturers/${selectedLecturer.lecturer_id}/reset-password`, payload);
+
+        setShowResetModal(false);
+        setSelectedLecturer(null);
+        setForm({ name: "", email: "", password: "" });
     } catch (err) {
-      console.error("Reset password error", err);
+        console.error("Reset password error", err);
+        alert("Failed to reset password");
     }
   };
 
   const handleDelete = async () => {
     try {
-      if (!selectedLecturer) return;
-      // TODO: axios.delete(`/admin/lecturers/${selectedLecturer.lecturer_id}`)
-      // Also backend should unassign classes
-      setLecturers((prev) => prev.filter((l) => l.lecturer_id !== selectedLecturer.lecturer_id));
-      setShowDeleteModal(false);
-      setSelectedLecturer(null);
+        if (!selectedLecturer) return;
+
+        await adminApi.delete(`/admin/lecturers/${selectedLecturer.lecturer_id}`);
+
+        setLecturers((prev) =>
+        prev.filter((l) => l.lecturer_id !== selectedLecturer.lecturer_id)
+        );
+
+        setShowDeleteModal(false);
+        setSelectedLecturer(null);
     } catch (err) {
-      console.error("Delete error", err);
+        console.error("Delete error", err);
+        alert("Failed to delete lecturer");
     }
   };
 

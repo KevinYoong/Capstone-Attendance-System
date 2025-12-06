@@ -18,5 +18,13 @@ export default function ProtectedRoute({ children, allowedRoles }: ProtectedRout
     return <Navigate to="/" replace />;
   }
 
+  // If admin role required, ensure token exists as a first-line check
+  if (allowedRoles && allowedRoles.includes("admin")) {
+    if (!user.token) {
+      // no token in context/localStorage — force login
+      return <Navigate to="/" replace />;
+    }
+  }
+
   return <>{children}</>;
 }

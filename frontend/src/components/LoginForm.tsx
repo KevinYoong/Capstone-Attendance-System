@@ -20,14 +20,17 @@ export default function LoginForm() {
     try {
       const response = await loginUser({ identifier, password });
 
-      // Save user in AuthContext
-      login(response.user);
+      // If backend returned a token (admin), pass it to login()
+      if (response.token && response.user.role === "admin") {
+        login(response.user as any, response.token);
+      } else {
+        login(response.user as any);
+      }
 
       // Navigate based on role
       if (response.user.role === "student") navigate("/student");
       else if (response.user.role === "lecturer") navigate("/lecturer");
       else if (response.user.role === "admin") navigate("/admin");
-
     } catch (err: any) {
       setError(err.response?.data?.message || "Invalid login credentials");
     } finally {
