@@ -249,7 +249,7 @@ router.post("/checkin", async (req: Request, res: Response) => {
     );
 
     // 6. Emit Socket.IO event for real-time updates
-    io.emit("studentCheckedIn", {
+    io.to(`class_${session.class_id}`).emit("studentCheckedIn", {
       class_id: session.class_id,
       session_id: session_id,
       student_id: student_id,
