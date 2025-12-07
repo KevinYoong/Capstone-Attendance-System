@@ -144,29 +144,72 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
 router.post("/class/:class_id/activate-checkin", async (req: Request, res: Response) => {
   const { class_id } = req.params;
 
+  let conn: any = null;
   try {
-    const startedAt = new Date();
-    const expiresAt = new Date(startedAt.getTime() + 2 * 60000);
+    conn = await (db as any).getConnection();
+    await conn.beginTransaction();
 
-    const [result] = await db.query(
-      `INSERT INTO Session (class_id, started_at, expires_at, online_mode) VALUES (?, ?, ?, ?)`,
+    // 1) Optional: mark any already expired sessions as is_expired = 1 (safety)
+    await conn.query(
+      `UPDATE Session SET is_expired = 1 WHERE class_id = ? AND expires_at < NOW() AND is_expired = 0`,
+      [class_id]
+    );
+
+    // 2) Check if there is an active session that hasn't expired (avoid duplicates)
+    const [activeRows] = await conn.query(
+      `SELECT session_id, expires_at FROM Session WHERE class_id = ? AND is_expired = 0 AND expires_at > NOW() ORDER BY started_at DESC LIMIT 1`,
+      [class_id]
+    );
+
+    if (activeRows.length > 0) {
+      // There's an active session — return it instead of creating a new one
+      const active = activeRows[0];
+      await conn.rollback();
+      conn.release();
+      return res.status(200).json({
+        message: "An active check-in already exists",
+        session_id: active.session_id,
+        started_at: active.started_at,
+        expires_at: active.expires_at,
+      });
+    }
+
+    // 3) Create new session
+    const startedAt = new Date();
+    const expiresAt = new Date(startedAt.getTime() + 2 * 60000); // 2 minutes default; optionally configurable
+
+    const [result] = await conn.query(
+      `INSERT INTO Session (class_id, started_at, expires_at, online_mode, is_expired)
+       VALUES (?, ?, ?, ?, 0)`,
       [class_id, startedAt, expiresAt, true]
     );
 
     const session_id = (result as any).insertId;
 
-    // Notify all connected clients (students) that a check-in has been activated
-    io.emit("checkinActivated", { class_id, session_id, startedAt, expiresAt });
+    await conn.commit();
+    conn.release();
 
-    res.status(201).json({
+    // Emit to this class room only
+    io.to(`class_${class_id}`).emit("checkinActivated", {
+      class_id: Number(class_id),
+      session_id,
+      startedAt,
+      expiresAt
+    });
+
+    return res.status(201).json({
       message: "Check-in activated",
       session_id,
       started_at: startedAt,
       expires_at: expiresAt,
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Error activating check-in" });
+    console.error("Error activating check-in:", err);
+    if (conn) {
+      try { await conn.rollback(); } catch (e) {}
+      try { conn.release(); } catch (e) {}
+    }
+    return res.status(500).json({ message: "Error activating check-in" });
   }
 });
 

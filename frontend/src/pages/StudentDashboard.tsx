@@ -1,10 +1,8 @@
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import { io } from "socket.io-client";
+import { useCallback, useEffect, useState } from 'react';
+import socket from '../utils/socket';
 import axios from 'axios';
-
-const socket = io("http://localhost:3001");
 
 interface Class {
   class_id: number;
@@ -56,6 +54,9 @@ export default function StudentDashboard() {
   // Track which classes the student has checked into
   const [checkedInClasses, setCheckedInClasses] = useState<Set<number>>(new Set());
 
+  // Track which sessions were missed (expired without check-in)
+  const [missedSessions, setMissedSessions] = useState<Set<number>>(new Set());
+
   // Semester and week navigation state
   const [semester, setSemester] = useState<Semester | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
@@ -67,8 +68,41 @@ export default function StudentDashboard() {
     navigate('/');
   };
 
+  const fetchSchedule = useCallback(async (week?: number) => {
+    try {
+      const weekParam = week || selectedWeek;
+      const res = await axios.get<Week>(
+        `http://localhost:3001/student/${user?.id}/classes/week?week=${
+          isViewingSemBreak ? "break" : weekParam
+        }`
+      );
+
+      const schedule: Week = {
+        Monday: Array.isArray(res.data.Monday) ? res.data.Monday : [],
+        Tuesday: Array.isArray(res.data.Tuesday) ? res.data.Tuesday : [],
+        Wednesday: Array.isArray(res.data.Wednesday) ? res.data.Wednesday : [],
+        Thursday: Array.isArray(res.data.Thursday) ? res.data.Thursday : [],
+        Friday: Array.isArray(res.data.Friday) ? res.data.Friday : [],
+      };
+
+      setWeekSchedule(schedule);
+    } catch (err) {
+      console.error("Error fetching schedule:", err);
+      setWeekSchedule({
+        Monday: [],
+        Tuesday: [],
+        Wednesday: [],
+        Thursday: [],
+        Friday: [],
+      });
+    }
+  }, [user?.id, selectedWeek, isViewingSemBreak]);
+
   useEffect(() => {
     if (!user) return;
+
+    // Join all classes the student is enrolled in
+    socket.emit("joinStudentRooms", user.id);
 
     const fetchSemester = async () => {
       try {
@@ -85,40 +119,8 @@ export default function StudentDashboard() {
       }
     };
 
-    const fetchSchedule = async (week?: number) => {
-      try {
-        const weekParam = week || selectedWeek;
-        const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week?week=${isViewingSemBreak ? "break" : weekParam}`);
-        // Ensure all days are arrays (handle API errors gracefully)
-        const schedule: Week = {
-          Monday: Array.isArray(res.data.Monday) ? res.data.Monday : [],
-          Tuesday: Array.isArray(res.data.Tuesday) ? res.data.Tuesday : [],
-          Wednesday: Array.isArray(res.data.Wednesday) ? res.data.Wednesday : [],
-          Thursday: Array.isArray(res.data.Thursday) ? res.data.Thursday : [],
-          Friday: Array.isArray(res.data.Friday) ? res.data.Friday : [],
-        };
-        setWeekSchedule(schedule);
-      } catch (err) {
-        console.error('Error fetching schedule:', err);
-        // Set empty schedule on error
-        setWeekSchedule({
-          Monday: [],
-          Tuesday: [],
-          Wednesday: [],
-          Thursday: [],
-          Friday: [],
-        });
-      }
-    };
-
     fetchSemester();
     fetchSchedule();
-
-    // Automatically open the current day
-    const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
-    if (Object.keys(weekSchedule).includes(today)) {
-      setOpenDays([today]);
-    }
 
     // ----- SOCKET LISTENERS -----
     socket.on("checkinActivated", (data) => {
@@ -143,42 +145,51 @@ export default function StudentDashboard() {
       }
     });
 
+    // Listen for session expiry (automatic yellow → red transition)
+    socket.on("sessionExpired", (data) => {
+      console.log("🔴 Session expired:", data);
+
+      // Check if student checked in for this session
+      setCheckedInClasses(prevChecked => {
+        const wasCheckedIn = prevChecked.has(data.class_id);
+
+        // If student didn't check in, mark as missed
+        if (!wasCheckedIn) {
+          setMissedSessions(prev => new Set(prev).add(data.class_id));
+        }
+
+        return prevChecked; // no change
+      });
+
+      // Remove from active sessions (yellow → red/grey transition)
+      setActiveSessions((prev) => {
+        const updated = { ...prev };
+        delete updated[data.class_id];
+        return updated;
+      });
+    });
+
     return () => {
       socket.off("checkinActivated");
       socket.off("studentCheckedIn");
+      socket.off("sessionExpired");
+      socket.emit("leaveStudentRooms", user.id);
     };
 
   }, [user]);
 
+  useEffect(() => {
+    const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+    if (Object.keys(weekSchedule).includes(today)) {
+      setOpenDays([today]);
+    }
+  }, [weekSchedule]);
+
   // Refetch schedule when selectedWeek changes
   useEffect(() => {
     if (!user || !semester) return;
-
-    const fetchSchedule = async () => {
-      try {
-        const res = await axios.get<Week>(`http://localhost:3001/student/${user.id}/classes/week?week=${isViewingSemBreak ? "break" : selectedWeek}`);
-        const schedule: Week = {
-          Monday: Array.isArray(res.data.Monday) ? res.data.Monday : [],
-          Tuesday: Array.isArray(res.data.Tuesday) ? res.data.Tuesday : [],
-          Wednesday: Array.isArray(res.data.Wednesday) ? res.data.Wednesday : [],
-          Thursday: Array.isArray(res.data.Thursday) ? res.data.Thursday : [],
-          Friday: Array.isArray(res.data.Friday) ? res.data.Friday : [],
-        };
-        setWeekSchedule(schedule);
-      } catch (err) {
-        console.error('Error fetching schedule:', err);
-        setWeekSchedule({
-          Monday: [],
-          Tuesday: [],
-          Wednesday: [],
-          Thursday: [],
-          Friday: [],
-        });
-      }
-    };
-
     fetchSchedule();
-  }, [selectedWeek, user, semester, isViewingSemBreak]);
+  }, [selectedWeek, user, semester, isViewingSemBreak, fetchSchedule]);
 
   const toggleDay = (day: string) => {
     if (openDays.includes(day)) {
@@ -472,6 +483,7 @@ export default function StudentDashboard() {
                   classes.map((cls, idx) => {
                   const isActive = activeSessions[cls.class_id] !== undefined;
                   const isCheckedIn = checkedInClasses.has(cls.class_id);
+                  const isMissed = missedSessions.has(cls.class_id); 
 
                   return (
                     <div
