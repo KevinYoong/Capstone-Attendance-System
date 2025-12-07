@@ -157,7 +157,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
     // 2) Check if there is an active session that hasn't expired (avoid duplicates)
     const [activeRows] = await conn.query(
-      `SELECT session_id, started_at, expires_at 
+      `SELECT session_id, started_at, expires_at, online_mode
       FROM Session 
       WHERE class_id = ? AND is_expired = 0 AND expires_at > NOW() 
       ORDER BY started_at DESC LIMIT 1`,
@@ -174,6 +174,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
         session_id: active.session_id,
         started_at: active.started_at,
         expires_at: active.expires_at,
+        online_mode: active.online_mode === 1
       });
     }
 

@@ -537,10 +537,10 @@ const fetchActiveSessions = useCallback(async () => {
                         {isCheckedIn ? "✓ Checked In" : isActive ? "Check In" : "Not Available"}
                       </button>
                        {isActive && activeSessions[cls.class_id]?.onlineMode && (
-                        <span className="text-blue-400 font-semibold text-sm block mt-1">
-                          Online Session — No GPS Required
-                        </span>
-                      )}
+                          <span className="text-blue-400 font-semibold text-sm block mt-1">
+                            Online Session — No GPS Required
+                          </span>
+                        )}
                     </div>
                   );
                 })
