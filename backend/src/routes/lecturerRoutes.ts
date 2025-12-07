@@ -157,7 +157,10 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
     // 2) Check if there is an active session that hasn't expired (avoid duplicates)
     const [activeRows] = await conn.query(
-      `SELECT session_id, expires_at FROM Session WHERE class_id = ? AND is_expired = 0 AND expires_at > NOW() ORDER BY started_at DESC LIMIT 1`,
+      `SELECT session_id, started_at, expires_at 
+      FROM Session 
+      WHERE class_id = ? AND is_expired = 0 AND expires_at > NOW() 
+      ORDER BY started_at DESC LIMIT 1`,
       [class_id]
     );
 
@@ -176,12 +179,14 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
     // 3) Create new session
     const startedAt = new Date();
-    const expiresAt = new Date(startedAt.getTime() + 2 * 60000); // 2 minutes default; optionally configurable
+    const expiresAt = new Date(startedAt.getTime() + 2 * 60000); 
+    const { online_mode } = req.body;
+    const isOnlineMode: boolean = online_mode === true;
 
     const [result] = await conn.query(
       `INSERT INTO Session (class_id, started_at, expires_at, online_mode, is_expired)
        VALUES (?, ?, ?, ?, 0)`,
-      [class_id, startedAt, expiresAt, true]
+      [class_id, startedAt, expiresAt, isOnlineMode ? 1 : 0]
     );
 
     const session_id = (result as any).insertId;
@@ -194,7 +199,8 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
       class_id: Number(class_id),
       session_id,
       startedAt,
-      expiresAt
+      expiresAt,
+      online_mode: isOnlineMode
     });
 
     return res.status(201).json({
@@ -202,6 +208,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
       session_id,
       started_at: startedAt,
       expires_at: expiresAt,
+      online_mode: isOnlineMode
     });
   } catch (err) {
     console.error("Error activating check-in:", err);

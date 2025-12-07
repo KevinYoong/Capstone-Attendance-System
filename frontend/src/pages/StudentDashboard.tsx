@@ -49,6 +49,7 @@ export default function StudentDashboard() {
   const [activeSessions, setActiveSessions] = useState<Record<number, {
     session_id: number;
     expiresAt: string;
+    onlineMode: boolean;
   }>>({});
 
   // Track which classes the student has checked into
@@ -130,7 +131,8 @@ export default function StudentDashboard() {
         ...prev,
         [data.class_id]: {
           session_id: data.session_id,
-          expiresAt: data.expiresAt
+          expiresAt: data.expiresAt,
+          onlineMode: data.online_mode
         }
       }));
     });
@@ -315,19 +317,6 @@ export default function StudentDashboard() {
     );
   };
 
-  const statusBadge = (status?: string) => {
-    switch (status) {
-      case 'yellow':
-        return <span className="text-yellow-400 font-semibold">🟡 Check-in open</span>;
-      case 'green':
-        return <span className="text-green-400 font-semibold">🟢 Checked in</span>;
-      case 'red':
-        return <span className="text-red-500 font-semibold">🔴 Missed</span>;
-      default:
-        return <span className="text-gray-400 font-semibold">⚪ Pending</span>;
-    }
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0a0f1f] via-[#0d1b2a] to-[#051923] text-white p-8">
       <div className="max-w-4xl mx-auto">
@@ -497,12 +486,15 @@ export default function StudentDashboard() {
                           {cls.class_name} ({cls.course_code})
                         </h3>
                         <p className="text-gray-400">Lecturer: {cls.lecturer_name}</p>
-                        {isCheckedIn
-                          ? <span className="text-green-400 font-semibold">🟢 Checked in</span>
-                          : isActive
-                            ? <span className="text-yellow-400 font-semibold">🟡 Check-in open</span>
-                            : <span className="text-gray-400 font-semibold">⚪ Pending</span>
-                        }
+                        {isCheckedIn ? (
+                          <span className="text-green-400 font-semibold">🟢 Checked in</span>
+                        ) : isMissed ? (
+                          <span className="text-red-500 font-semibold">🔴 Missed</span>
+                        ) : isActive ? (
+                          <span className="text-yellow-400 font-semibold">🟡 Check-in open</span>
+                        ) : (
+                          <span className="text-gray-400 font-semibold">⚪ Pending</span>
+                        )}
                       </div>
                       <button
                         onClick={() => handleCheckIn(cls.class_id)}
@@ -516,6 +508,11 @@ export default function StudentDashboard() {
                       >
                         {isCheckedIn ? "✓ Checked In" : isActive ? "Check In" : "Not Available"}
                       </button>
+                       {isActive && activeSessions[cls.class_id]?.onlineMode && (
+                        <span className="text-blue-400 font-semibold text-sm block mt-1">
+                          Online Session — No GPS Required
+                        </span>
+                      )}
                     </div>
                   );
                 })

@@ -115,7 +115,9 @@ export default function LecturerClassDetail() {
   const handleActivateCheckIn = async () => {
     if (!class_id) return;
     try {
-    const res = await axios.post(`/lecturer/class/${class_id}/activate-checkin`);
+    const res = await axios.post(`/lecturer/class/${class_id}/activate-checkin`, {
+        online_mode: onlineMode
+      });
 
     setSession({
     session_id: res.data.session_id,
@@ -130,16 +132,7 @@ export default function LecturerClassDetail() {
     }
   };
 
-  const statusBadge = (status?: string) => {
-    switch (status) {
-      case "checked-in":
-        return <span className="text-green-400 font-semibold">🟢 Checked in</span>;
-      case "missed":
-        return <span className="text-red-500 font-semibold">🔴 Missed</span>;
-      default:
-        return <span className="text-gray-400 font-semibold">⚪ Pending</span>;
-    }
-  };
+  const [onlineMode, setOnlineMode] = useState<boolean>(true);
 
   if (loading) return <p className="text-white p-8">Loading...</p>;
 
@@ -158,6 +151,17 @@ export default function LecturerClassDetail() {
         </p>
         <p>Lecturer: {classInfo?.lecturer_name}</p>
 
+        <div className="flex items-center gap-3 mt-3">
+          <label className="font-semibold">Online Mode</label>
+          <input 
+            type="checkbox" 
+            checked={onlineMode} 
+            onChange={(e) => setOnlineMode(e.target.checked)} 
+          />
+          <span className="text-sm text-gray-400">
+            {onlineMode ? "Geolocation disabled" : "Geolocation required"}
+          </span>
+        </div>
 
         <div className="mt-4">
          {session ? (
