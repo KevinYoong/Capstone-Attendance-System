@@ -46,17 +46,23 @@ export default function LecturerClassDetail() {
 
     setSession(res.data.session || null);
 
+    if (res.data.session) {
+      setOnlineMode(res.data.session.online_mode === true);
+    }
+
     const checkins = res.data.checkins || [];
-    const checkinMap = new Map(checkins.map((c: any) => [c.student_id, c.status]));
+    const checkinMap = new Map(
+      checkins.map((c: any) => [c.student_id, c.status])
+    );
 
     setStudents(
-    (res.data.students || []).map((s: any) => ({
-    student_id: Number(s.student_id),
-    name: s.name,
-    email: s.email,
-    status: checkinMap.has(s.student_id) ? "checked-in" : "pending",
-    }))
-    );
+      (res.data.students || []).map((s: any) => ({
+        student_id: Number(s.student_id),
+        name: s.name,
+        email: s.email,
+        status: checkinMap.has(s.student_id) ? "checked-in" : "pending",
+        }))
+      );
     } catch (err) {
     console.error("Error fetching class details:", err);
     } finally {
