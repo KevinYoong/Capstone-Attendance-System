@@ -1,14 +1,14 @@
-# CLAUDE.md (Updated)
+**CLAUDE.md (Updated December 2025)**
 Guidance file for AI coding assistants working on this repository.
+**Last Updated**: December 2025
+**Based on Commit**: Latest — Auto Session Expiry + Missed Attendance Integration
 
-**Last Updated:** December 2025
-**Based on Commit:** `5df57dd - Implement Socket.IO server & integrate real-time infrastructure groundwork`
-
----
-
-## Project Overview
-
-This is a **Capstone Attendance System**: a full-stack geolocation-based attendance tracking app with separate interfaces for students and lecturers. The system enables real-time check-in activation and verification based on **location**, with plans for **QR scan auto-check-in**, class session management, and attendance analytics.
+**Project Overview**
+This repository contains the **Capstone Attendance System**, a full-stack, real-time geolocation-based attendance tracking platform with three user roles:
+- Students — view classes, check in (GPS or online mode), view status
+- Lecturers — activate sessions, monitor real-time attendance, review check-ins
+- Admins — manage semesters, users, classes, and assignments
+The system supports **automatic session expiry, geolocation distance validation, online-mode check-ins, a complete semester/week navigation system**, and upcoming Phase 7 **attendance analytics**.
 
 ### Current Status (✅ = Implemented, ⏳ = Pending, 🚧 = Partially Implemented)
 
@@ -21,45 +21,39 @@ This is a **Capstone Attendance System**: a full-stack geolocation-based attenda
 - ✅ Authentication system with bcrypt
 - ✅ Role-based routing and protected routes
 
-**Features Implemented:**
-- ✅ User login (students via email OR student_id, lecturers via email only)
-- ✅ Student dashboard with weekly class schedule
-- ✅ Lecturer dashboard with weekly class schedule
-- ✅ Lecturer class detail view with student list
-- ✅ Check-in session activation (30-minute expiry)
-- ✅ Real-time check-in notifications via Socket.IO
-- ✅ Persistent user sessions (localStorage)
-
-**Features Pending:**
-- ⏳ Student check-in submission endpoint
-- ⏳ Geolocation verification (distance calculation)
-- ⏳ QR code scanner for quick check-in
-- ⏳ Check-in expiry enforcement
-- ⏳ JWT token-based authentication
-- ⏳ Online mode toggle (bypass geolocation)
-- ⏳ Attendance history view for lecturers
-- ⏳ Attendance analytics dashboard for students
+**Curent Status**
+| Component                               |         Status               |
+| Socket.IO real-time system              |         | ✅ Complete                                  |
+| Check-in session activation                       | ✅ Complete                                  |
+| Student one-click check-in                        | ✅ Complete                                  |
+| Automatic session expiry handler                  | ✅ Complete                                  |
+| Missed attendance auto-insertion                  | ✅ Complete                                  |
+| GPS geolocation verification                      | ✅ Complete                                  |
+| Online mode (no GPS)                              | ✅ Complete                                  |
+| Week navigation + semester system                 | ✅ Complete                                  |
+| Admin portal (CRUD for users, classes, semesters) | ✅ Complete                                  |
+| Student dashboard                                 | ✅ Complete                                  |
+| Lecturer dashboard + class detail view            | ✅ Complete                                  |
+| Attendance history API                            | 🚧 In Progress (Phase 7)                    |
+| Lecturer analytics                                | 🚧 Phase 7 (current)                        |
+| Student analytics                                 | 🚧 Phase 7 (current)                        |
+| QR code check-in                                  | ❌ Removed (no longer part of project scope) |
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology | Version |
-|------|------------|---------|
-| **Frontend** | React + Vite | 19.1.1 |
-| **Frontend Language** | TypeScript | Latest |
-| **Styling** | TailwindCSS | Latest |
-| **Routing** | React Router | 7.9.5 |
-| **Backend** | Node.js (Express) | 5.1.0 |
-| **Backend Language** | TypeScript | Latest |
-| **Database** | MySQL | Latest (`mysql2/promise` 3.15.3) |
-| **Auth** | bcrypt | 6.0.0 |
-| **Real-time** | Socket.IO | 4.8.1 (server & client) |
-| **HTTP Client** | Axios | Latest |
-| **Build & Dev** | Vite HMR, tsx (TypeScript runner) | Latest |
-
-**Future Additions:**
-- JWT (jsonwebtoken 9.0.2 installed but not yet implemented)
+| Layer          | Technology                       |
+| -------------- | -------------------------------- |
+| Frontend       | React (TypeScript), Vite         |
+| Styling        | TailwindCSS                      |
+| Realtime       | Socket.IO (client + server)      |
+| Backend        | Node.js (Express + TypeScript)   |
+| Database       | MySQL (`mysql2/promise`)         |
+| Authentication | bcrypt                           |
+| API Client     | Axios                            |
+| Build Tools    | tsx, Vite                        |
+| Storage        | localStorage session persistence |
 
 ---
 
@@ -75,6 +69,9 @@ Capstone-Attendance-System/
 │   │   └── routes/
 │   │       ├── studentRoutes.ts      # Student-specific endpoints
 │   │       └── lecturerRoutes.ts     # Lecturer-specific endpoints
+│   │       └── adminRoutes.ts        # Admin-specific endpoints
+│   │   ├── utils/
+│   │   │   └── semesterUtils.ts     # Week numbering system
 │   ├── package.json
 │   ├── tsconfig.json
 │   ├── .env                          # DB credentials (not committed)
@@ -87,13 +84,23 @@ Capstone-Attendance-System/
 │   │   │   ├── StudentDashboard.tsx  # Student weekly schedule & check-in
 │   │   │   ├── LecturerDashboard.tsx # Lecturer weekly schedule
 │   │   │   └── LecturerClassDetail.tsx # Class details, students, check-in activation
+│   │   │   ├── admin/
+│   │   │   │   └── AdminClasses.tsx  # Show the classes in the admin page 
+│   │   │   │   └── AdminDashboard.tsx # Show the admin dashboard 
+│   │   │   │   └── AdminLecturers.tsx # Show the lecturers in the admin page 
+│   │   │   │   └── AdminSemester.tsx  # Show the semesters in the admin page
+│   │   │   │   └── AdminStudents.tsx  # Show the students in the admin page 
 │   │   ├── components/
 │   │   │   ├── LoginForm.tsx         # Login form with validation
 │   │   │   └── ProtectedRoute.tsx    # Role-based route protection
+│   │   │   └── AdminSidebar.tsx      # Sidebar used throughout all admin pages
 │   │   ├── context/
 │   │   │   └── AuthContext.tsx       # Global auth state (Context API)
 │   │   ├── services/
 │   │   │   └── api.ts                # Axios API client
+│   │   ├── utils/
+│   │   │   └── adminAPI.ts           # Centralised Axios API client
+│   │   │   └── socket.ts             # Centralised socket used for frontend
 │   │   ├── App.tsx                   # Main app component with routing
 │   │   ├── main.tsx                  # Entry point
 │   │   ├── index.css                 # TailwindCSS imports
@@ -135,30 +142,30 @@ Based on SQL queries used throughout the application:
 - `name` (VARCHAR)
 - `email` (VARCHAR, UNIQUE)
 - `password` (VARCHAR, bcrypt hashed)
-- `phone_number` (VARCHAR)
-- `created_at` (TIMESTAMP)
 
 **Lecturer Table:**
 - `lecturer_id` (PK, AUTO_INCREMENT)
 - `name` (VARCHAR)
 - `email` (VARCHAR, UNIQUE)
 - `password` (VARCHAR, bcrypt hashed)
-- `phone_number` (VARCHAR)
-- `created_at` (TIMESTAMP)
 
 **Class Table:**
-- `class_id` (PK, AUTO_INCREMENT)
-- `class_name` (VARCHAR)
-- `course_code` (VARCHAR)
-- `day_of_week` (VARCHAR) - e.g., "Monday"
-- `start_time` (TIME) - e.g., "09:00:00"
-- `end_time` (TIME) - e.g., "11:00:00"
-- `class_type` (VARCHAR) - e.g., "Lecture", "Tutorial"
-- `lecturer_id` (FK → Lecturer)
+- class_id (int)
+- lecturer_id (int)
+- class_name (varchar(255))
+- course_code (varchar(45))
+- time (varchar(255))
+- location_lat (decimal(10,8))
+- location_lng (decimal(11,8))
+- day_of_week (enum('Monday','Tuesday','Wednesday','Thursday','Friday'))
+- start_time (time)
+- end_time (time)
+- class_type (enum('Lecture','Tutorial'))
 
 **StudentClass Table:**
 - `student_id` (FK → Student)
 - `class_id` (FK → Class)
+- `joined_at` (TIMESTAMP)
 
 **Session Table:**
 - `session_id` (PK, AUTO_INCREMENT)
@@ -166,6 +173,7 @@ Based on SQL queries used throughout the application:
 - `started_at` (DATETIME)
 - `expires_at` (DATETIME) - 30 minutes after start
 - `online_mode` (BOOLEAN) - Bypasses geolocation if TRUE
+- `is_expires` (BOOLEAN)
 
 **Checkin Table:**
 - `checkin_id` (PK, AUTO_INCREMENT)
@@ -173,17 +181,17 @@ Based on SQL queries used throughout the application:
 - `student_id` (FK → Student)
 - `checkin_time` (DATETIME)
 - `status` (VARCHAR) - e.g., "present", "late", "absent"
+- `student_lat` (decimal(10,8))
+- `student_lng` (decimal(11,8))
+- `accuracy` (decimal(7,2))
 
 ---
 
 ## Authentication Rules
-
-| User Type | Login Identifier | Allowed? | Notes |
-|----------|----------------|---------|------|
-| Student | **Email** | ✅ | Standard email login |
-| Student | **Student ID (numeric)** | ✅ | Unique to students |
-| Lecturer | **Email** | ✅ | Standard email login |
-| Lecturer | Numeric ID login | ❌ | Intentionally prevented |
+| Identifier         | Students | Lecturers | Admin |
+| ------------------ | -------- | --------- | ----- |
+| Email              | ✅       | ✅       | ✅   |
+| Student ID numeric | ✅       | ❌       | ❌   |
 
 **Password Security:**
 - All passwords are **bcrypt-hashed** before storage
@@ -197,7 +205,7 @@ Based on SQL queries used throughout the application:
 
 ---
 
-## Backend Implementation
+## Backend Implementation Overview 
 
 ### Base URL
 ```
@@ -206,12 +214,14 @@ http://localhost:3001
 
 ### Core Files
 
-| File | Purpose | Location |
-|------|---------|----------|
-| `index.ts` | Main server, Socket.IO setup, login endpoint | `/backend/index.ts` (127 lines) |
-| `db.ts` | MySQL connection pool | `/backend/db.ts` (14 lines) |
-| `studentRoutes.ts` | Student-specific endpoints | `/backend/src/routes/studentRoutes.ts` (85 lines) |
-| `lecturerRoutes.ts` | Lecturer-specific endpoints | `/backend/src/routes/lecturerRoutes.ts` (159 lines) |
+| File                | Purpose                                   |
+| `index.ts`          | Express server, Socket.IO, login, background job init|
+| `studentRoutes.ts`  | Student endpoints                         |
+| `lecturerRoutes.ts` | Lecturer endpoints                        |
+| `adminRoutes.ts`    | Admin CRUD endpoints                      |
+| `semesterRoutes.ts` | Semester system                           |
+| `geolocation.ts`    | Distance calculation                      |
+| `sessionExpiryJob.ts`| Auto-expiry + missed check-ins           |
 
 ### API Endpoints
 
@@ -242,13 +252,36 @@ http://localhost:3001
 }
 ```
 
-**Logic:**
-1. Check if identifier is numeric → Query Student table by `student_id`
-2. Check if identifier contains `@` → Try Student table by email, then Lecturer by email
-3. Compare password with `bcrypt.compare()`
-4. Return user object with role
+**Core Feature Logic:**
+Core Feature Logic
+1. Session Activation
+Lecturer triggers activation → backend:
+- creates a Session row
+- sets expires_at
+- emits Socket.IO event
+- class turns yellow (check-in open)
+Frontend responds immediately.
 
-**Location:** `/backend/index.ts:59-127`
+2. Student Check-in
+Students perform check-in via:POST /student/checkin
+Backend logic:
+- Validate session exists & not expired
+- Validate student is enrolled
+- If online_mode = false → validate GPS using Haversine
+- Insert a Checkin record
+- Emit studentCheckedIn
+UI turns green (checked in).
+
+3. Auto Session Expiry (Phase 6 — COMPLETE)
+A background job runs every 10 seconds:
+- Finds sessions where expires_at < NOW()
+- Marks session as expired (is_expired = 1)
+- Inserts "missed" check-ins for students who:
+  - joined BEFORE session started
+  - did NOT check in
+Frontend receives: sessionExpired
+Student dashboards show red (missed). 
+Lecturer dashboards update pending → missed.
 
 ---
 
@@ -485,31 +518,15 @@ PORT=3001
 **Purpose:** Display student's weekly class schedule with check-in functionality
 
 **Features:**
-- ✅ Fetches schedule from `/student/{id}/classes/week`
-- ✅ Displays classes grouped by weekday (collapsible sections)
-- ✅ Shows active check-in status via Socket.IO listener
-- ✅ Check-in button enabled only when session is active
-- ✅ Real-time updates: listens for `checkinActivated` events
-- ✅ Auto-expands current day on load
-- ✅ Logout button
-- ⏳ Check-in submission (button exists but no endpoint yet)
-
-**Key State:**
-```typescript
-const [weekSchedule, setWeekSchedule] = useState<WeekSchedule>({});
-const [openDays, setOpenDays] = useState<string[]>([]);
-const [activeSessions, setActiveSessions] = useState<Record<number, any>>({});
-```
-
-**Socket.IO Listener:**
-```typescript
-socket.on("checkinActivated", (data) => {
-  setActiveSessions((prev) => ({
-    ...prev,
-    [data.class_id]: data,
-  }));
-});
-```
+- Weekly schedule
+- Auto-expands today
+- Real-time updates
+- Check-in with GPS or online mode
+- Shows:
+  - 🟢 Checked in
+  - 🔴 Missed
+  - 🟡 Check-in open
+  - ⚪ Pending
 
 **Location:** `/frontend/src/pages/StudentDashboard.tsx:1-205`
 
@@ -632,157 +649,221 @@ const response = await loginUser({
 
 ---
 
-## Current Implementation Status
-
-### ✅ Completed Features
-
-| Feature | Description | Files Involved |
-|---------|-------------|----------------|
-| User Authentication | bcrypt password hashing, login endpoint | `backend/index.ts`, `LoginForm.tsx` |
-| Role-based Routing | Separate student/lecturer dashboards | `App.tsx`, `ProtectedRoute.tsx` |
-| Weekly Schedule Display | Classes grouped by weekday | `StudentDashboard.tsx`, `LecturerDashboard.tsx` |
-| Check-in Activation | 30-minute session creation | `lecturerRoutes.ts`, `LecturerClassDetail.tsx` |
-| Real-time Notifications | Socket.IO infrastructure | `backend/index.ts`, `StudentDashboard.tsx` |
-| Persistent Sessions | localStorage user state | `AuthContext.tsx` |
-| TypeScript Migration | Full type safety | All `.ts` and `.tsx` files |
-| Responsive UI | TailwindCSS dark theme | All frontend components |
-
----
-
-### ⏳ Pending Features
-
-| Feature | Description | Priority | Estimated Effort |
-|---------|-------------|----------|------------------|
-| Student Check-in Submission | POST endpoint to record check-in | 🔴 High | 2-4 hours |
-| Geolocation Verification | Distance calculation (lat/lng) | 🔴 High | 4-6 hours |
-| Check-in Expiry Enforcement | Prevent check-in after 30 min | 🟡 Medium | 2-3 hours |
-| QR Code Scanner | Mobile-optimized QR scan UI | 🟡 Medium | 4-6 hours |
-| JWT Authentication | Token-based auth instead of localStorage | 🟡 Medium | 3-5 hours |
-| Online Mode Toggle | Bypass geolocation for online classes | 🟢 Low | 2-3 hours |
-| Attendance History View | Lecturer view of past sessions | 🟢 Low | 4-6 hours |
-| Student Analytics Dashboard | Charts for attendance % | 🟢 Low | 6-8 hours |
-| Database Migrations | Version-controlled schema changes | 🟢 Low | 2-4 hours |
-
----
-
 ## Development Roadmap
-### Phase 1: Complete Core Check-in Flow (Priority 🔴)
-**Goal:** Enable students to actually check in
+✅ Phase 1: Basic Check-in Flow (COMPLETE)
+    ✅ Socket.IO real-time infrastructure
+    ✅ Lecturer activates check-in session
+    ✅ Student one-click check-in
+    ✅ Real-time UI updates (yellow → green)
+    ✅ Session expiry (2 minutes for testing)
 
-| Task | Endpoint/File | Description |
-|------|---------------|-------------|
-| 1.1 | `POST /student/checkin` | Implement check-in submission endpoint |
-| 1.2 | `studentRoutes.ts` | Validate session expiry before accepting check-in |
-| 1.3 | `StudentDashboard.tsx` | Connect "Check In" button to API endpoint |
-| 1.4 | `lecturerRoutes.ts` | Fix student status query to show actual check-in status |
+Key Files:
+    backend/index.ts - Socket.IO server setup
+    backend/src/routes/lecturerRoutes.ts - POST /lecturer/activate-checkin
+    backend/src/routes/studentRoutes.ts - POST /student/checkin
+    frontend/src/pages/StudentDashboard.tsx - Socket.IO listeners
+    frontend/src/pages/LecturerClassDetail.tsx - Real-time attendance view
 
-**Expected Outcome:** Students can click "Check In" button and see confirmation, lecturers see real-time attendance updates
+✅ Phase 2: Geolocation Verification (COMPLETE)
+    ✅ Haversine distance calculation function
+    ✅ Browser Geolocation API integration
+    ✅ Backend location validation (500m campus radius)
+    ✅ GPS data stored in database (student_lat, student_lng, accuracy)
+    ✅ Online mode bypass option
 
----
+Key Files:
+    backend/src/routes/studentRoutes.ts - calculateDistance(), geolocation validation
+    frontend/src/pages/StudentDashboard.tsx - navigator.geolocation.getCurrentPosition()
+    backend/.env - CAMPUS_LATITUDE, CAMPUS_LONGITUDE, CAMPUS_RADIUS
 
-### Phase 2: Geolocation Verification (Priority 🔴)
-**Goal:** Ensure students are physically present
+Database:
+    Checkin table has columns: student_lat, student_lng, accuracy
 
-| Task | Description |
-|------|-------------|
-| 2.1 | Add `latitude`, `longitude` columns to Class table |
-| 2.2 | Add geolocation fields to Checkin table |
-| 2.3 | Implement Haversine formula for distance calculation |
-| 2.4 | Frontend: Request location permission on check-in |
-| 2.5 | Backend: Validate student is within X meters of class location |
-| 2.6 | Frontend: Show error if student too far away |
+🔄 Phase 3: Semester & Week System (COMPLETE)
+✅ Completed Tasks:
 
-**Expected Outcome:** Students must be within 50m (configurable) of class location to check in
+Task 1: Database Setup
+    Created Semester table (semester_id, name, start_date, end_date, current_week, is_sem_break, status)
+    Created Admin table (admin_id, name, email, password)
+    Modified Class table (added semester_id, start_week, end_week columns)
+    Seeded "September 2025" semester (start: 2025-01-06)
+    Migration file: backend/migrations/003_add_semester_system.sql
 
----
+Task 2: Backend Semester Logic
+    Created backend/src/routes/semesterRoutes.ts
+    Endpoint: GET /semester/current - Returns active semester info
+    Endpoint: GET /semester/:id - Get specific semester
+    Registered in backend/index.ts
 
-### Phase 3: QR Code Quick Check-in (Priority 🟡)
-**Goal:** Enable fast check-in via QR scan
+Task 3: Update Class Endpoints to Filter by Week
+    Updated GET /student/:id/classes/week?week=X to accept week parameter
+    Filters classes by semester and week range (start_week, end_week)
+    Returns empty schedule during semester break
+    Response includes semester metadata and week_number
 
-| Task | Description |
-|------|-------------|
-| 3.1 | Generate unique QR code for each session |
-| 3.2 | QR code encodes: `session_id` + validation token |
-| 3.3 | Frontend: QR scanner page (mobile-optimized) |
-| 3.4 | Backend: `POST /student/checkin/qr` endpoint |
-| 3.5 | Auto-check-in after successful QR scan |
+Task 3 Enhancement: Automatic Week Calculation
+    Created backend/src/utils/semesterUtils.ts
+    Function: calculateCurrentWeek(startDate) - Automatically calculates current week from dates
+    No manual updates needed - system syncs with real calendar dates
+    Logic:
+        Week 1-7: Days 0-48 (49 days)
+        Sem Break: Days 49-55 (7 days, between weeks 7 and 8)
+        Week 8-14: Days 56-104 (49 days)
+    Updated semesterRoutes.ts and studentRoutes.ts to use date-based calculation
 
-**Expected Outcome:** Students can scan QR code displayed by lecturer to check in instantly
+Task 4: Frontend Week Navigation UI (StudentDashboard) - NEXT
+    Add week selector UI: "Week X of 14" display
+    Add "Previous Week" / "Next Week" navigation buttons
+    Fetch semester data from GET /semester/current
+    Update API call to use ?week=X parameter
+    Show "🏖️ Semester Break" banner when is_viewing_sem_break = true
+    Disable check-in during semester break
 
----
+Task 5: Frontend Week Navigation UI (LecturerDashboard)
+    Same as Task 4 but for lecturer view
+    Update lecturer class endpoints to be week-aware
+    Show which week classes are being viewed
 
-### Phase 4: Online Mode & Enhancements (Priority 🟡)
-**Goal:** Support hybrid learning
+Task 6: Test Complete Semester System
+    Test week navigation (browsing weeks 1-14)
+    Test semester break display
+    Verify automatic week calculation
+    Test that classes only appear in their assigned weeks
 
-| Task | Description |
-|------|-------------|
-| 4.1 | Add online mode toggle UI in LecturerClassDetail |
-| 4.2 | `PATCH /lecturer/session/:id/toggle-online` endpoint |
-| 4.3 | Frontend: Hide geolocation requirement if online_mode = TRUE |
-| 4.4 | Implement check-in expiry warning notifications |
-| 4.5 | Add manual session end button for lecturers |
+Task 6A: Enhancements 
+    Updating backend endpoints to accept week parameter
+    Update StudentDashboard: allow navigation to weeks 1-14
+    Add future week indicator (blue)
+    Add dates to day headers in StudentDashboard
+    Refetch schedule when selectedWeek changes
+    Apply same changes to LecturerDashboard
+    Implement semester break display
 
-**Expected Outcome:** Lecturers can enable online mode to allow remote check-ins
+✅ Phase 4: Admin Portal - Core Functions (COMPLETE)
+Estimated Time: 3-4 days
+Tasks:
+    Update /login endpoint to support admin role
+    Create AdminDashboard.tsx (base layout, routing, sidebar)
+    Admin: Manage Semesters UI 
+        View all semesters (table)
+        Create new semester (form with name, start_date, end_date)
+        Set active semester (toggle)
+        View calculated current week (read-only, auto-calculated from dates)
+    Styling to match student/lecturer dashboards
 
----
+New Routes:
+    POST /login (updated to handle admin)
+    GET /admin/semesters
+    POST /admin/semesters
+    PATCH /admin/semesters/:id/activate
 
-### Phase 5: History & Analytics (Priority 🟢)
-**Goal:** Provide attendance insights
+✅ Phase 5: Admin Portal - Class Assignment (COMPLETE)
+Estimated Time: 5-7 days
+Tasks:
+    CRUD Students
+        Create student (form: name, email, student_id, password)
+        Edit student (update details)
+        Delete student (with confirmation)
+        View all students (table with search/filter)
 
-| Task | Description |
-|------|-------------|
-| 5.1 | Lecturer: Attendance history page (past sessions) |
-| 5.2 | Student: Personal attendance analytics dashboard |
-| 5.3 | Charts: Attendance % per class, attendance trends |
-| 5.4 | Export attendance data as CSV |
+    CRUD Lecturers
+        Create lecturer (form: name, email, password)
+        Edit lecturer
+        Delete lecturer
+        View all lecturers (table)
 
-**Expected Outcome:** Users can view historical attendance data and trends
+    CRUD Classes
+        Create class (name, course_code, day, time, type, lecturer, semester, weeks)
+        Edit class (reassign lecturer, change schedule)
+        Delete class
+        View all classes (table, filter by semester)
 
----
+    Assign Students to Classes
+        View class details page
+        See enrolled students (table)
+        Add students (multi-select dropdown)
+        Remove students from class
 
-### Phase 6: Security & Production Readiness (Priority 🟢)
-**Goal:** Make app production-ready
+New Routes:
+    Students: GET/POST/PUT/DELETE /admin/students
+    Lecturers: GET/POST/PUT/DELETE /admin/lecturers
+    Classes: GET/POST/PUT/DELETE /admin/classes
+    Assignments: POST/DELETE /admin/classes/:id/students
 
-| Task | Description |
-|------|-------------|
-| 6.1 | Implement JWT token-based authentication |
-| 6.2 | Add request validation middleware |
-| 6.3 | Implement rate limiting |
-| 6.4 | Add API error logging |
-| 6.5 | Environment-specific configs (dev/prod) |
-| 6.6 | Database migrations system |
+✅ Phase 6: Auto Session Expiry (COMPLETE)
+Estimated Time: 1-2 days
+Tasks:
+    Backend: Background job to check expired sessions
+    Socket.IO: Emit 'sessionExpired' event when session expires
+    Frontend: StudentDashboard listens for sessionExpired
+    Frontend: Update UI (yellow → red) when session expires
+    Integration testing
 
-**Expected Outcome:** Secure, scalable, production-ready application
+New Features:
+    Automatic session expiry detection (no page refresh)
+    Visual feedback when time runs out
+
+🚧 Phase 7: Attendance Analytics (NOT STARTED)
+Estimated Time: 3-4 days
+Tasks:
+    Lecturer Analytics
+        View attendance history by class
+        Filter by week/date range
+        Export to CSV
+        Show attendance percentage per class
+
+    Student Analytics
+        View personal attendance percentage (per class)
+        Show missed classes
+        Attendance streak tracker
+        Weekly attendance summary
+
+New Routes:
+    GET /lecturer/:id/analytics
+    GET /student/:id/analytics
+    GET /lecturer/:id/classes/:class_id/attendance?week=X
 
 ---
 
 ## Key Rules for AI Assistants
 
-1. **Do not rewrite working code unless necessary.**
-2. **Frontend must use functional components + hooks (TypeScript).**
-3. **Backend must use async/await with `db.query()` (TypeScript).**
-4. **NEVER store raw passwords. Always hash using bcrypt.**
-5. **Follow existing response format for all endpoints:**
-   ```typescript
-   return res.status(200).json({ success: true, data: ... });
-   ```
-6. **Socket.IO events must be broadcast via `io.emit()` from backend routes.**
-7. **All protected routes must verify user authentication (future: JWT validation).**
-8. **Use TypeScript types/interfaces for all data structures.**
-9. **Follow TailwindCSS for styling (no inline CSS or CSS-in-JS).**
-10. **Database queries must use parameterized statements to prevent SQL injection.**
+1. **Do not refactor working logic unless asked.**
+2. **Maintain TypeScript types everywhere.**
+3. **Backend must use async/await + parameterized queries.**
+4. **Never store plaintext passwords.**
+5. **All Socket.IO events must match existing payload structure.**
+6. **Maintain consistent response objects ({ success: true, data: ... }).**
+7. **React components must use hooks (no classes).**
+8. **TailwindCSS for all UI styling.**
+9. **Keep semester/week logic consistent with backend utilities.**
+10. **Auto-expiry job must never duplicate missed entries (use transaction + row-level lock).**
 
 ## Environment Variables
 
 **Backend (`.env`):**
 ```
+# Database Configuration
 DB_HOST=localhost
 DB_USER=root
-DB_PASSWORD=your_password
+DB_PASSWORD=0127482848
 DB_NAME=attendance_system
 PORT=3001
+
+# JWT Configuration
+JWT_SECRET=supersecretkey123
+JWT_EXPIRES_IN=1d
+
+# DEVELOPMENT: Home Location (for testing from home)
+CAMPUS_LATITUDE=3.0709795053170406
+CAMPUS_LONGITUDE=101.56627247844794
+CAMPUS_RADIUS=500
+
+# PRODUCTION: University Campus (uncomment when deploying)
+# CAMPUS_LATITUDE=3.0673419209015633
+# CAMPUS_LONGITUDE=101.6037889559458
+# CAMPUS_RADIUS=500
 ```
 
 **Last Updated:** December 2, 2025
 **Maintained By:** Development Team
-**Version:** 2.0 (Socket.IO Implementation Complete)
+**Version:** 3.0 — Auto Expiry + Missed Logic Integrated
