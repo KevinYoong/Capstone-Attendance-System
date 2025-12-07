@@ -99,75 +99,104 @@ export default function StudentDashboard() {
     }
   }, [user?.id, selectedWeek, isViewingSemBreak]);
 
+  // Fetch active sessions for the logged-in student
+const fetchActiveSessions = useCallback(async () => {
+  if (!user?.id) return;
+  try {
+    const res = await axios.get<{ success: boolean; sessions: Array<any> }>(
+      `http://localhost:3001/student/${user.id}/active-sessions`
+    );
+
+    if (!res.data?.success) return;
+
+    // Map into activeSessions shape: { [classId]: { session_id, expiresAt, onlineMode } }
+    const map: Record<number, { session_id: number; expiresAt: string; onlineMode: boolean }> = {};
+
+    res.data.sessions.forEach((s: any) => {
+      map[s.class_id] = {
+        session_id: s.session_id,
+        expiresAt: new Date(s.expires_at).toISOString(),
+        onlineMode: !!s.online_mode,
+      };
+    });
+
+    setActiveSessions((prev) => ({ ...prev, ...map }));
+  } catch (err) {
+    console.error("Error fetching active sessions:", err);
+  }
+}, [user?.id]);
+
   useEffect(() => {
     if (!user) return;
 
-    // Join all classes the student is enrolled in
+    // 1) join student rooms first (so socket emits from server that use rooms are honored)
     socket.emit("joinStudentRooms", user.id);
 
+    // 2) fetch semester and schedule (existing)
     const fetchSemester = async () => {
       try {
         setLoadingSemester(true);
-        const res = await axios.get<{success: boolean, data: Semester}>('http://localhost:3001/semester/current');
+        const res = await axios.get<{ success: boolean; data: Semester }>(
+          "http://localhost:3001/semester/current"
+        );
         if (res.data.success) {
           setSemester(res.data.data);
           setSelectedWeek(res.data.data.current_week);
         }
       } catch (err) {
-        console.error('Error fetching semester:', err);
+        console.error("Error fetching semester:", err);
       } finally {
         setLoadingSemester(false);
       }
     };
 
     fetchSemester();
-    fetchSchedule();
+    fetchSchedule(); // your existing fetchSchedule
+
+    // 3) **new**: fetch active sessions immediately (so newly-logged students see already-activated sessions)
+    fetchActiveSessions();
 
     // ----- SOCKET LISTENERS -----
-    socket.on("checkinActivated", (data) => {
+    socket.on("checkinActivated", (data: any) => {
       console.log("Activated:", data);
+
+      // support both server naming variants: online_mode or onlineMode
+      const onlineMode = data.online_mode ?? data.onlineMode ?? false;
 
       setActiveSessions((prev) => ({
         ...prev,
         [data.class_id]: {
           session_id: data.session_id,
-          expiresAt: data.expiresAt,
-          onlineMode: data.online_mode
-        }
+          expiresAt: data.expiresAt ?? data.expires_at ?? new Date().toISOString(),
+          onlineMode: !!onlineMode,
+        },
       }));
     });
 
-    // Listen for when ANY student checks in (including this student)
-    socket.on("studentCheckedIn", (data) => {
+    socket.on("studentCheckedIn", (data: any) => {
       console.log("Student checked in:", data);
-
-      // If this student checked in, update local state
       if (data.student_id === user?.id) {
-        setCheckedInClasses(prev => new Set(prev).add(data.class_id));
+        setCheckedInClasses((prev) => new Set(prev).add(data.class_id));
       }
     });
 
-    // Listen for session expiry (automatic yellow → red transition)
-    socket.on("sessionExpired", (data) => {
+    socket.on("sessionExpired", (data: any) => {
       console.log("🔴 Session expired:", data);
 
-      // Check if student checked in for this session
-      setCheckedInClasses(prevChecked => {
+      // If student didn't check in, mark missed
+      setCheckedInClasses((prevChecked) => {
         const wasCheckedIn = prevChecked.has(data.class_id);
-
-        // If student didn't check in, mark as missed
         if (!wasCheckedIn) {
-          setMissedSessions(prev => new Set(prev).add(data.class_id));
+          setMissedSessions((prev) => new Set(prev).add(data.class_id));
         }
-
-        return prevChecked; // no change
+        return prevChecked;
       });
 
-      // Remove from active sessions (yellow → red/grey transition)
+      // Remove active session entry
       setActiveSessions((prev) => {
-        const updated = { ...prev };
-        delete updated[data.class_id];
-        return updated;
+        const copy = { ...prev };
+        delete copy[data.class_id];
+        return copy;
       });
     });
 
@@ -177,8 +206,7 @@ export default function StudentDashboard() {
       socket.off("sessionExpired");
       socket.emit("leaveStudentRooms", user.id);
     };
-
-  }, [user]);
+  }, [user, fetchSchedule, fetchActiveSessions]);
 
   useEffect(() => {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });

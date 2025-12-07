@@ -85,6 +85,40 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/:student_id/active-sessions", async (req: Request, res: Response) => {
+  const { student_id } = req.params;
+
+  try {
+    // Return sessions for student's classes where session is not expired
+    const [rows] = await db.query<any[]>(
+      `
+      SELECT s.session_id, s.class_id, s.started_at, s.expires_at, s.online_mode
+      FROM Session s
+      JOIN StudentClass sc ON sc.class_id = s.class_id
+      WHERE sc.student_id = ?
+        AND s.expires_at > NOW()
+        AND (s.is_expired = 0 OR s.is_expired IS NULL)
+      ORDER BY s.expires_at ASC
+      `,
+      [student_id]
+    );
+
+    // Normalize online_mode to boolean
+    const sessions = rows.map((r) => ({
+      session_id: r.session_id,
+      class_id: r.class_id,
+      started_at: r.started_at,
+      expires_at: r.expires_at,
+      online_mode: !!r.online_mode,
+    }));
+
+    return res.json({ success: true, sessions });
+  } catch (err) {
+    console.error("Error fetching active sessions:", err);
+    return res.status(500).json({ success: false, message: "Error fetching active sessions" });
+  }
+});
+
 router.post("/session-started", (req: Request, res: Response) => {
   const { class_id, started_at, expires_at } = req.body;
 
