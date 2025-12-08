@@ -418,4 +418,130 @@ router.post("/checkin", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/:student_id/analytics", async (req: Request, res: Response) => {
+  const { student_id } = req.params;
+
+  try {
+    // 1) Get active semester
+    const [semRows] = await db.query<any[]>(
+      `SELECT * FROM Semester WHERE status = 'active' LIMIT 1`
+    );
+
+    if (semRows.length === 0) {
+      return res.status(404).json({ success: false, message: "No active semester found" });
+    }
+
+    const semester = semRows[0];
+
+    // 2) Get the student's enrolled classes
+    const [classRows] = await db.query<any[]>(
+      `
+      SELECT c.class_id, c.class_name, c.course_code, c.class_type, c.lecturer_id,
+             l.name AS lecturer_name
+      FROM StudentClass sc
+      JOIN Class c ON c.class_id = sc.class_id
+      JOIN Lecturer l ON l.lecturer_id = c.lecturer_id
+      WHERE sc.student_id = ?
+      ORDER BY c.class_name
+      `,
+      [student_id]
+    );
+
+    if (classRows.length === 0) {
+      return res.json({
+        success: true,
+        semester,
+        classes: [],
+      });
+    }
+
+    const results: any[] = [];
+
+    // 3) For each class → get sessions for this semester
+    for (const cls of classRows) {
+      const [sessions] = await db.query<any[]>(
+        `
+        SELECT s.session_id, s.started_at, s.expires_at, s.is_expired, s.online_mode
+        FROM Session s
+        WHERE s.class_id = ?
+          AND s.started_at BETWEEN ? AND ?
+        ORDER BY s.started_at ASC
+        `,
+        [cls.class_id, semester.start_date, semester.end_date]
+      );
+
+      let presentCount = 0;
+      let missedCount = 0;
+
+      // Session detail list per class
+      const sessionDetails: any[] = [];
+
+      for (const sess of sessions) {
+        const [check] = await db.query<any[]>(
+          `
+          SELECT *
+          FROM Checkin
+          WHERE session_id = ?
+            AND student_id = ?
+          LIMIT 1
+          `,
+          [sess.session_id, student_id]
+        );
+
+        const isPresent = check.length > 0;
+
+        if (isPresent) presentCount++;
+        else missedCount++;
+
+        sessionDetails.push({
+          session_id: sess.session_id,
+          started_at: sess.started_at,
+          expires_at: sess.expires_at,
+          was_present: isPresent,
+          status: isPresent ? "present" : "missed",
+          online_mode: !!sess.online_mode,
+          is_expired: !!sess.is_expired
+        });
+      }
+
+      const totalSessions = presentCount + missedCount;
+      const attendanceRate = totalSessions === 0
+        ? 0
+        : Math.round((presentCount / totalSessions) * 100);
+
+      // Determine attendance status
+      let status: "good" | "warning" | "critical";
+      if (attendanceRate >= 90) status = "good";
+      else if (attendanceRate >= 80) status = "warning";
+      else status = "critical";
+
+      results.push({
+        class_id: cls.class_id,
+        class_name: cls.class_name,
+        course_code: cls.course_code,
+        class_type: cls.class_type,
+        lecturer_name: cls.lecturer_name,
+
+        total_sessions: totalSessions,
+        present_count: presentCount,
+        missed_count: missedCount,
+        attendance_rate: attendanceRate,
+        attendance_status: status,
+
+        sessions: sessionDetails
+      });
+    }
+
+    return res.json({
+      success: true,
+      semester,
+      classes: results
+    });
+
+  } catch (err) {
+    console.error("Error fetching student analytics:", err);
+    return res.status(500).json({ success: false, message: "Error loading student analytics" });
+  }
+});
+
 export default router;

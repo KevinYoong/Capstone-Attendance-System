@@ -360,4 +360,176 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
   }
 });
 
+// Manually checking in a student
+router.post("/session/:session_id/manual-checkin", async (req: Request, res: Response) => {
+  const { session_id } = req.params;
+  const { student_id } = req.body;
+
+  if (!student_id) {
+    return res.status(400).json({ success: false, message: "student_id is required" });
+  }
+
+  try {
+    // 1) Validate session exists
+    const [sessionRows] = await db.query<any[]>(
+      `SELECT session_id, class_id, expires_at, is_expired 
+       FROM Session 
+       WHERE session_id = ?`,
+      [session_id]
+    );
+
+    if (sessionRows.length === 0) {
+      return res.status(404).json({ success: false, message: "Session not found" });
+    }
+
+    const session = sessionRows[0];
+
+    // 2) Check if session is expired
+    const now = new Date();
+    if (session.is_expired === 1 || new Date(session.expires_at) < now) {
+      return res.status(400).json({ success: false, message: "Session already expired" });
+    }
+
+    // 3) Prevent duplicate check-ins
+    const [existing] = await db.query<any[]>(
+      `SELECT checkin_id 
+       FROM Checkin 
+       WHERE session_id = ? AND student_id = ?`,
+      [session_id, student_id]
+    );
+
+    if (existing.length > 0) {
+      return res.status(200).json({
+        success: true,
+        message: "Student already checked in",
+        alreadyCheckedIn: true
+      });
+    }
+
+    // 4) Insert manual check-in
+    await db.query(
+      `INSERT INTO Checkin (session_id, student_id, checkin_time, status)
+       VALUES (?, ?, NOW(), 'checked-in')`,
+      [session_id, student_id]
+    );
+
+    // 5) Emit to lecturer & students watching the class
+    io.to(`class_${session.class_id}`).emit("studentCheckedIn", {
+      class_id: session.class_id,
+      student_id,
+      session_id,
+      manual: true
+    });
+
+    return res.json({
+      success: true,
+      message: "Manual check-in successful",
+      student_id,
+      session_id
+    });
+
+  } catch (err) {
+    console.error("Manual check-in error:", err);
+    return res.status(500).json({ success: false, message: "Server error during manual check-in" });
+  }
+});
+
+// Lecturer analytics endpoint (Semester overview)
+router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
+  const { lecturer_id } = req.params;
+
+  try {
+    // 1. Get active semester
+    const [semRows] = await db.query<any[]>(
+      `SELECT * FROM Semester WHERE status='active' LIMIT 1`
+    );
+
+    if (semRows.length === 0)
+      return res.status(404).json({ success: false, message: "No active semester" });
+
+    const semester = semRows[0];
+
+    // 2. Fetch all classes for this lecturer
+    const [classRows] = await db.query<any[]>(
+      `
+      SELECT class_id, class_name, course_code
+      FROM Class
+      WHERE lecturer_id = ?
+      ORDER BY class_name
+      `,
+      [lecturer_id]
+    );
+
+    const results: any[] = [];
+
+    for (const cls of classRows) {
+      // 3. Get all sessions within semester
+      const [sessions] = await db.query<any[]>(
+        `
+        SELECT session_id
+        FROM Session
+        WHERE class_id = ?
+          AND started_at BETWEEN ? AND ?
+        `,
+        [cls.class_id, semester.start_date, semester.end_date]
+      );
+
+      let presentCount = 0;
+      let missedCount = 0;
+
+      for (const sess of sessions) {
+        const [presentRows] = await db.query<any[]>(
+          `SELECT COUNT(*) AS count FROM Checkin WHERE session_id = ?`,
+          [sess.session_id]
+        );
+
+        const present = presentRows[0].count;
+
+        // Count all enrolled students
+        const [totalRows] = await db.query<any[]>(
+          `SELECT COUNT(*) AS count FROM StudentClass WHERE class_id = ?`,
+          [cls.class_id]
+        );
+
+        const total = totalRows[0].count;
+        const missed = total - present;
+
+        presentCount += present;
+        missedCount += missed;
+      }
+
+      const totalSessions = sessions.length;
+      const attendanceRate =
+        totalSessions === 0 ? 0 : Math.round((presentCount / (presentCount + missedCount)) * 100);
+
+      let status: "good" | "warning" | "critical";
+      if (attendanceRate >= 90) status = "good";
+      else if (attendanceRate >= 80) status = "warning";
+      else status = "critical";
+
+      results.push({
+        class_id: cls.class_id,
+        class_name: cls.class_name,
+        course_code: cls.course_code,
+        total_sessions: totalSessions,
+        present_count: presentCount,
+        missed_count: missedCount,
+        attendance_rate: attendanceRate,
+        attendance_status: status
+      });
+    }
+
+    return res.json({
+      success: true,
+      semester,
+      classes: results
+    });
+
+  } catch (err) {
+    console.error("Lecturer analytics error:", err);
+    return res.status(500).json({ success: false, message: "Error loading analytics" });
+  }
+});
+
+
 export default router;
