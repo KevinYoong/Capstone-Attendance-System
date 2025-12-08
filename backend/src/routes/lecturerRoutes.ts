@@ -87,6 +87,145 @@ router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => 
   }
 });
 
+router.get("/class/:class_id/active-session", async (req: Request, res: Response) => {
+  const { class_id } = req.params;
+
+  try {
+    // Find the active (not expired) session for this class (if exists)
+    const [activeRows] = await db.query<any[]>(
+      `
+      SELECT session_id, class_id, started_at, expires_at, online_mode, is_expired
+      FROM Session
+      WHERE class_id = ?
+        AND (is_expired = 0 OR is_expired IS NULL)
+        AND expires_at > NOW()
+      ORDER BY started_at DESC
+      LIMIT 1
+      `,
+      [class_id]
+    );
+
+    if (activeRows.length === 0) {
+      return res.json({ success: true, session: null, checkins: [] });
+    }
+
+    const session = activeRows[0];
+
+    // Fetch checkins for this session with student info
+    const [checkinRows] = await db.query<any[]>(
+      `
+      SELECT ci.checkin_id, ci.session_id, ci.student_id, ci.checkin_time, ci.status,
+             s.name AS student_name, s.email AS student_email
+      FROM Checkin ci
+      JOIN Student s ON s.student_id = ci.student_id
+      WHERE ci.session_id = ?
+      ORDER BY ci.checkin_time ASC
+      `,
+      [session.session_id]
+    );
+
+    return res.json({
+      success: true,
+      session: {
+        session_id: session.session_id,
+        class_id: session.class_id,
+        started_at: session.started_at,
+        expires_at: session.expires_at,
+        online_mode: !!session.online_mode,
+        is_expired: !!session.is_expired
+      },
+      checkins: checkinRows
+    });
+  } catch (err) {
+    console.error("Error fetching active session:", err);
+    return res.status(500).json({ success: false, message: "Error fetching active session" });
+  }
+});
+
+router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Response) => {
+  const { lecturer_id } = req.params;
+
+  try {
+    // 1) Get active semester
+    const [semRows] = await db.query<any[]>(
+      `SELECT * FROM Semester WHERE status = 'active' LIMIT 1`
+    );
+
+    if (semRows.length === 0) {
+      return res.status(404).json({ success: false, message: "No active semester found" });
+    }
+    const semester = semRows[0];
+
+    // 2) Get classes for this lecturer (that fall within semester is not necessary here because classes are tied to semester in schema)
+    const [classRows] = await db.query<any[]>(
+      `
+      SELECT class_id, class_name, course_code
+      FROM Class
+      WHERE lecturer_id = ?
+      ORDER BY class_name
+      `,
+      [lecturer_id]
+    );
+
+    // 3) For each class, fetch sessions in semester range and their checkins
+    const classesWithSessions: any[] = [];
+
+    for (const c of classRows) {
+      const [sessions] = await db.query<any[]>(
+        `
+        SELECT s.session_id, s.class_id, s.started_at, s.expires_at, s.online_mode, s.is_expired
+        FROM Session s
+        WHERE s.class_id = ?
+          AND s.started_at BETWEEN ? AND ?
+        ORDER BY s.started_at ASC
+        `,
+        [c.class_id, semester.start_date, semester.end_date]
+      );
+
+      // For each session, gather checkins
+      const sessionsWithCheckins = [];
+      for (const s of sessions) {
+        const [checkins] = await db.query<any[]>(
+          `
+          SELECT ci.checkin_id, ci.session_id, ci.student_id, ci.checkin_time, ci.status,
+                 st.name AS student_name, st.email AS student_email
+          FROM Checkin ci
+          JOIN Student st ON st.student_id = ci.student_id
+          WHERE ci.session_id = ?
+          ORDER BY ci.checkin_time ASC
+          `,
+          [s.session_id]
+        );
+
+        sessionsWithCheckins.push({
+          session_id: s.session_id,
+          started_at: s.started_at,
+          expires_at: s.expires_at,
+          online_mode: !!s.online_mode,
+          is_expired: !!s.is_expired,
+          checkins: checkins
+        });
+      }
+
+      classesWithSessions.push({
+        class_id: c.class_id,
+        class_name: c.class_name,
+        course_code: c.course_code,
+        sessions: sessionsWithCheckins
+      });
+    }
+
+    return res.json({
+      success: true,
+      semester,
+      classes: classesWithSessions
+    });
+  } catch (err) {
+    console.error("Error fetching lecturer semester attendance:", err);
+    return res.status(500).json({ success: false, message: "Error fetching attendance" });
+  }
+});
+
 // Get detailed class info
 router.get("/class/:class_id/details", async (req: Request, res: Response) => {
   const { class_id } = req.params;

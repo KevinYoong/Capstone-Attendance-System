@@ -44,6 +44,12 @@ export default function LecturerDashboard() {
   });
   const [openDays, setOpenDays] = useState<string[]>([]);
 
+  // Track which sessions are currently active (check-in activated)
+  const [activeSessions, setActiveSessions] = useState<Record<number, boolean>>({});
+
+  // Track which classes had active sessions in past weeks
+  const [pastActivatedClasses, setPastActivatedClasses] = useState<Set<number>>(new Set());
+
   // Semester and week navigation state
   const [semester, setSemester] = useState<Semester | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
@@ -54,6 +60,30 @@ export default function LecturerDashboard() {
     logout();
     navigate('/');
   };
+
+  // Fetch active sessions for all classes in the current week
+  const fetchActiveSessionsForWeek = async (classes: Class[]) => {
+  const map: Record<number, boolean> = {};
+
+  for (const cls of classes) {
+    try {
+      const res = await axios.get(
+        `http://localhost:3001/lecturer/class/${cls.class_id}/active-session`
+      );
+
+      if (res.data?.session && !res.data.session.is_expired) {
+        map[cls.class_id] = true; // Active
+      } else {
+        map[cls.class_id] = false; // Not active
+      }
+    } catch (err) {
+      console.error("Error fetching active session for class:", cls.class_id, err);
+      map[cls.class_id] = false;
+    }
+  }
+
+  setActiveSessions(map);
+};
 
   useEffect(() => {
     if (!user) return;
@@ -88,6 +118,14 @@ export default function LecturerDashboard() {
           Friday: Array.isArray(res.data.Friday) ? res.data.Friday : [],
         };
         setWeekSchedule(schedule);
+        const allClasses = [
+          ...schedule.Monday,
+          ...schedule.Tuesday,
+          ...schedule.Wednesday,
+          ...schedule.Thursday,
+          ...schedule.Friday
+        ];
+        fetchActiveSessionsForWeek(allClasses);
       } catch (err) {
         console.error('Error fetching schedule:', err);
         // Set empty schedule on error
@@ -101,8 +139,32 @@ export default function LecturerDashboard() {
       }
     };
 
+    const fetchPastActivations = async () => {
+      try {
+        const res = await axios.get(
+          `http://localhost:3001/lecturer/${user.id}/attendance/semester`
+        );
+
+        if (!res.data?.success) return;
+
+        const classList = res.data.classes || [];
+        const set = new Set<number>();
+
+        classList.forEach((c: any) => {
+          if (c.sessions && c.sessions.length > 0) {
+            set.add(c.class_id);
+          }
+        });
+
+        setPastActivatedClasses(set);
+      } catch (err) {
+        console.error("Error fetching past activations:", err);
+      }
+    };
+
     fetchSemester();
     fetchSchedule();
+    fetchPastActivations();
 
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
     if (Object.keys(weekSchedule).includes(today)) {
@@ -127,6 +189,15 @@ export default function LecturerDashboard() {
           Friday: Array.isArray(res.data.Friday) ? res.data.Friday : [],
         };
         setWeekSchedule(schedule);
+        const allClasses = [
+          ...schedule.Monday,
+          ...schedule.Tuesday,
+          ...schedule.Wednesday,
+          ...schedule.Thursday,
+          ...schedule.Friday
+        ];
+
+        fetchActiveSessionsForWeek(allClasses);
       } catch (err) {
         console.error('Error fetching schedule:', err);
         setWeekSchedule({
@@ -364,10 +435,18 @@ export default function LecturerDashboard() {
                       <button
                         onClick={() => handleActivateCheckIn(cls.class_id)}
                         className={`mt-2 md:mt-0 px-4 py-2 text-white rounded-lg transition ${
-                          cls.status === 'green' ? 'bg-green-600 hover:bg-green-500' : 'bg-gray-500 hover:bg-gray-400'
+                          activeSessions[cls.class_id]
+                            ? "bg-green-600 hover:bg-green-500"
+                            : pastActivatedClasses.has(cls.class_id)
+                              ? "bg-blue-600 hover:bg-blue-500"
+                              : "bg-gray-500 hover:bg-gray-400"
                         }`}
                       >
-                        {cls.status === 'green' ? 'Activated' : 'Activate Check-in'}
+                        {activeSessions[cls.class_id]
+                          ? "Active Now"
+                          : pastActivatedClasses.has(cls.class_id)
+                            ? "Previously Activated"
+                            : "Activate Check-In"}
                       </button>
                     </div>
                   ))

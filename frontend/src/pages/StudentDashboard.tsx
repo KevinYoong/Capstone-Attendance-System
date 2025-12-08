@@ -64,6 +64,10 @@ export default function StudentDashboard() {
   const [loadingSemester, setLoadingSemester] = useState<boolean>(true);
   const [isViewingSemBreak, setIsViewingSemBreak] = useState<boolean>(false);
 
+  // Store full semester attendance history
+  const [attendanceSessions, setAttendanceSessions] = useState<any[]>([]);
+  const [attendanceSummaryByClass, setAttendanceSummaryByClass] = useState<Record<number, any>>({});
+
   const handleLogout = () => {
     logout();
     navigate('/');
@@ -100,31 +104,70 @@ export default function StudentDashboard() {
   }, [user?.id, selectedWeek, isViewingSemBreak]);
 
   // Fetch active sessions for the logged-in student
-const fetchActiveSessions = useCallback(async () => {
-  if (!user?.id) return;
-  try {
-    const res = await axios.get<{ success: boolean; sessions: Array<any> }>(
-      `http://localhost:3001/student/${user.id}/active-sessions`
-    );
+  const fetchActiveSessions = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await axios.get<{ success: boolean; sessions: Array<any> }>(
+        `http://localhost:3001/student/${user.id}/active-sessions`
+      );
 
-    if (!res.data?.success) return;
+      if (!res.data?.success) return;
 
-    // Map into activeSessions shape: { [classId]: { session_id, expiresAt, onlineMode } }
-    const map: Record<number, { session_id: number; expiresAt: string; onlineMode: boolean }> = {};
+      // Map into activeSessions shape: { [classId]: { session_id, expiresAt, onlineMode } }
+      const map: Record<number, { session_id: number; expiresAt: string; onlineMode: boolean }> = {};
 
-    res.data.sessions.forEach((s: any) => {
-      map[s.class_id] = {
-        session_id: s.session_id,
-        expiresAt: new Date(s.expires_at).toISOString(),
-        onlineMode: !!s.online_mode,
-      };
-    });
+      res.data.sessions.forEach((s: any) => {
+        map[s.class_id] = {
+          session_id: s.session_id,
+          expiresAt: new Date(s.expires_at).toISOString(),
+          onlineMode: !!s.online_mode,
+        };
+      });
 
-    setActiveSessions((prev) => ({ ...prev, ...map }));
-  } catch (err) {
-    console.error("Error fetching active sessions:", err);
-  }
-}, [user?.id]);
+      setActiveSessions((prev) => ({ ...prev, ...map }));
+    } catch (err) {
+      console.error("Error fetching active sessions:", err);
+    }
+  }, [user?.id]);
+
+  const fetchAttendanceSemester = useCallback(async () => {
+    if (!user?.id || !semester) return;
+
+    try {
+      const res = await axios.get(
+        `http://localhost:3001/student/${user.id}/attendance/semester`
+      );
+
+      if (!res.data?.success) return;
+
+      const attendance = res.data.attendance || [];
+      const summary = res.data.summary_by_class || [];
+
+      setAttendanceSessions(attendance);
+
+      // Build lookup map for class summaries
+      const map: Record<number, any> = {};
+      summary.forEach((s: any) => {
+        map[s.class_id] = s;
+      });
+      setAttendanceSummaryByClass(map);
+
+      // Reconstruct persistent check-in / missed states
+      const checkedSet = new Set<number>();
+      const missedSet = new Set<number>();
+
+      attendance.forEach((sess: any) => {
+        if (sess.student_status === "present") checkedSet.add(sess.class_id);
+        else if (sess.student_status === "missed") missedSet.add(sess.class_id);
+      });
+
+      setCheckedInClasses(checkedSet);
+      setMissedSessions(missedSet);
+
+    } catch (err) {
+      console.error("Error fetching attendance semester:", err);
+    }
+  }, [user?.id, semester]);
 
   useEffect(() => {
     if (!user) return;
@@ -142,6 +185,7 @@ const fetchActiveSessions = useCallback(async () => {
         if (res.data.success) {
           setSemester(res.data.data);
           setSelectedWeek(res.data.data.current_week);
+          await fetchAttendanceSemester();
         }
       } catch (err) {
         console.error("Error fetching semester:", err);
@@ -498,9 +542,29 @@ const fetchActiveSessions = useCallback(async () => {
                   <p className="text-gray-400 px-4 py-2 text-center">No classes today.</p>
                 ) : (
                   classes.map((cls, idx) => {
-                  const isActive = activeSessions[cls.class_id] !== undefined;
-                  const isCheckedIn = checkedInClasses.has(cls.class_id);
-                  const isMissed = missedSessions.has(cls.class_id); 
+                  // Determine week range
+                  if (!semester) return null; // Prevent rendering before semester loads
+                  const semesterStart = new Date(semester.start_date);
+                  const start = new Date(semesterStart);
+                  start.setDate(start.getDate() + (selectedWeek - 1) * 7);
+                  const end = new Date(start);
+                  end.setDate(start.getDate() + 6);
+
+                  // Find session for this class in this week
+                  const sessionForThisWeek = attendanceSessions.find(
+                    (s) =>
+                      s.class_id === cls.class_id &&
+                      new Date(s.started_at) >= start &&
+                      new Date(s.started_at) <= end
+                  );
+
+                  // Determine status
+                  const isCheckedIn = sessionForThisWeek?.student_status === "present";
+                  const isMissed = sessionForThisWeek?.student_status === "missed";
+                  const isActive =
+                    activeSessions[cls.class_id] !== undefined &&
+                    !isCheckedIn &&
+                    !isMissed;
 
                   return (
                     <div

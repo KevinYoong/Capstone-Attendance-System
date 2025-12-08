@@ -85,6 +85,113 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/:student_id/attendance/semester", async (req: Request, res: Response) => {
+  const { student_id } = req.params;
+
+  try {
+    // 1. Load active semester
+    const [semRows] = await db.query<any[]>(
+      `SELECT * FROM Semester WHERE status = 'active' LIMIT 1`
+    );
+
+    if (semRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "No active semester found"
+      });
+    }
+
+    const semester = semRows[0];
+
+    // 2. Load ALL sessions in this semester that belong to classes the student is enrolled in
+    const [sessionRows] = await db.query<any[]>(
+      `
+      SELECT 
+        s.session_id,
+        s.class_id,
+        s.started_at,
+        s.expires_at,
+        s.online_mode,
+        s.is_expired,
+
+        c.class_name,
+        c.course_code,
+
+        ci.status AS student_status
+
+      FROM Session s
+      JOIN Class c ON c.class_id = s.class_id
+      JOIN StudentClass sc ON sc.class_id = s.class_id AND sc.student_id = ?
+
+      LEFT JOIN Checkin ci 
+        ON ci.session_id = s.session_id 
+       AND ci.student_id = ?
+
+      WHERE s.started_at BETWEEN ? AND ?
+      ORDER BY s.started_at ASC
+      `,
+      [student_id, student_id, semester.start_date, semester.end_date]
+    );
+
+    // 3. Normalize status (if CI missing but expired → missed; if not expired → pending)
+    const attendance = sessionRows.map((s) => {
+      let status = s.student_status;
+
+      if (!status) {
+        status = s.is_expired ? "missed" : "pending";
+      }
+
+      return {
+        session_id: s.session_id,
+        class_id: s.class_id,
+        class_name: s.class_name,
+        course_code: s.course_code,
+        started_at: s.started_at,
+        expires_at: s.expires_at,
+        online_mode: s.online_mode,
+        student_status: status
+      };
+    });
+
+    // 4. Build per-class summary (for analytics UI & lecturer UI)
+    const summaryByClass: Record<number, any> = {};
+
+    attendance.forEach((a) => {
+      if (!summaryByClass[a.class_id]) {
+        summaryByClass[a.class_id] = {
+          class_id: a.class_id,
+          class_name: a.class_name,
+          course_code: a.course_code,
+          total_sessions: 0,
+          present_count: 0,
+          missed_count: 0,
+          latest_status: null
+        };
+      }
+
+      const s = summaryByClass[a.class_id];
+      s.total_sessions += 1;
+      if (a.student_status === "present") s.present_count++;
+      if (a.student_status === "missed") s.missed_count++;
+      s.latest_status = a.student_status; // last entry = latest
+    });
+
+    return res.json({
+      success: true,
+      semester,
+      attendance,
+      summary_by_class: Object.values(summaryByClass)
+    });
+
+  } catch (err) {
+    console.error("Error loading semester attendance:", err);
+    res.status(500).json({
+      success: false,
+      message: "Failed to load semester attendance"
+    });
+  }
+});
+
 router.get("/:student_id/active-sessions", async (req: Request, res: Response) => {
   const { student_id } = req.params;
 

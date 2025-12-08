@@ -25,6 +25,8 @@ interface Session {
   session_id: number;
   started_at: string;
   expires_at: string;
+  online_mode?: boolean;
+  is_expired?: boolean;
 }
 
 export default function LecturerClassDetail() {
@@ -44,7 +46,18 @@ export default function LecturerClassDetail() {
     // backend shape: { classInfo, students, session, checkins }
     setClassInfo(res.data.classInfo || null);
 
-    setSession(res.data.session || null);
+    const rawSession = res.data.session;
+    setSession(
+      rawSession
+        ? {
+            session_id: Number(rawSession.session_id),
+            started_at: rawSession.started_at,
+            expires_at: rawSession.expires_at,
+            online_mode: !!rawSession.online_mode,
+            is_expired: !!rawSession.is_expired,
+          }
+        : null
+    );
 
     if (res.data.session) {
       setOnlineMode(res.data.session.online_mode === true);
@@ -60,7 +73,9 @@ export default function LecturerClassDetail() {
         student_id: Number(s.student_id),
         name: s.name,
         email: s.email,
-        status: checkinMap.has(s.student_id) ? "checked-in" : "pending",
+        status: checkinMap.has(s.student_id)
+          ? "checked-in"
+          : (res.data.session?.is_expired ? "missed" : "pending"),
         }))
       );
     } catch (err) {
@@ -140,6 +155,27 @@ export default function LecturerClassDetail() {
 
   const [onlineMode, setOnlineMode] = useState<boolean>(true);
 
+  const handleManualCheckIn = async (studentId: number) => {
+    if (!session) return;
+    try {
+      await axios.post(`/lecturer/session/${session.session_id}/manual-checkin`, {
+        student_id: studentId
+      });
+
+      // Optimistically update UI
+      setStudents(prev =>
+        prev.map(s =>
+          s.student_id === studentId
+            ? { ...s, status: "checked-in" }
+            : s
+        )
+      );
+
+    } catch (err) {
+      console.error("Manual check-in failed:", err);
+    }
+  };
+
   if (loading) return <p className="text-white p-8">Loading...</p>;
 
   return (
@@ -171,7 +207,13 @@ export default function LecturerClassDetail() {
 
         <div className="mt-4">
          {session ? (
-          <p className="text-yellow-400 font-semibold">🟡 Check-in active until {new Date(session.expires_at).toLocaleTimeString()}</p>
+          <p className="text-yellow-400 font-semibold">
+            🟡 Active until {new Date(session.expires_at).toLocaleTimeString()}
+            <br />
+            Attendance: {
+              students.filter(s => s.status === "checked-in").length
+            } / {students.length}
+          </p>
           ) : (
           <button onClick={handleActivateCheckIn} className="px-4 py-2 bg-green-600 rounded hover:bg-green-500">
           Activate Check-in
@@ -185,25 +227,54 @@ export default function LecturerClassDetail() {
         {students.length === 0 ? (
           <p>No students enrolled.</p>
         ) : (
-          <div className="space-y-2">
-            {students.map((s) => (
-              <div key={s.student_id} className="flex justify-between px-4 py-2 bg-[#22222a] rounded-md">
-                <div>
-                  <p className="font-semibold">{s.name}</p>
-                  <p className="text-gray-400">{s.email}</p>
+          <>
+            {/* Checked In Group */}
+            {students
+              .filter(s => s.status === "checked-in")
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map(s => (
+                <div key={s.student_id} className="flex justify-between px-4 py-2 bg-[#22222a] rounded-md">
+                  <div>
+                    <p className="font-semibold">{s.name}</p>
+                    <p className="text-gray-400">{s.email}</p>
+                  </div>
+                  <span className="text-green-400 font-semibold">🟢 Checked in</span>
                 </div>
-                <div>
-                  {s.status === "checked-in" ? (
-                    <span className="text-green-400 font-semibold">🟢 Checked in</span>
-                  ) : s.status === "missed" ? (
-                    <span className="text-red-500 font-semibold">🔴 Missed</span>
-                  ) : (
-                    <span className="text-gray-400 font-semibold">⚪ Pending</span>
-                  )}
+              ))}
+
+            {/* Pending Group */}
+            {students
+              .filter(s => s.status === "pending")
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map(s => (
+                <div key={s.student_id} className="flex justify-between px-4 py-2 bg-[#22222a] rounded-md">
+                  <div>
+                    <p className="font-semibold">{s.name}</p>
+                    <p className="text-gray-400">{s.email}</p>
+                  </div>
+                  <button
+                    className="text-green-400 font-bold hover:text-green-300"
+                    onClick={() => handleManualCheckIn(s.student_id)}
+                  >
+                    ✔
+                  </button>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+
+            {/* Missed Group */}
+            {students
+              .filter(s => s.status === "missed")
+              .sort((a, b) => a.name.localeCompare(b.name))
+              .map(s => (
+                <div key={s.student_id} className="flex justify-between px-4 py-2 bg-[#22222a] rounded-md">
+                  <div>
+                    <p className="font-semibold">{s.name}</p>
+                    <p className="text-gray-400">{s.email}</p>
+                  </div>
+                  <span className="text-red-500 font-semibold">🔴 Missed</span>
+                </div>
+              ))}
+          </>
         )}
       </div>
     </div>
