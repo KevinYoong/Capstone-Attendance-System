@@ -11,6 +11,10 @@ import AdminSemesters from "./pages/admin/AdminSemesters";
 import LecturerClassDetail from "./pages/LecturerClassDetail";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import StudentAnalyticsOverview from "./pages/analytics/StudentAnalyticsOverview";
+import StudentClassAnalytics from "./pages/analytics/StudentClassAnalytics";
+import LecturerAnalyticsOverview from "./pages/analytics/LecturerAnalyticsOverview";
+import LecturerClassAnalytics from "./pages/analytics/LecturerClassAnalytics";
 
 export default function App() {
   return (
@@ -29,6 +33,24 @@ export default function App() {
             }
           />
 
+          {/* Student Analytics */}
+          <Route
+            path="/student/analytics"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <StudentAnalyticsOverview />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/student/analytics/class/:class_id"
+            element={
+              <ProtectedRoute allowedRoles={["student"]}>
+                <StudentClassAnalytics />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Lecturer Only */}
           <Route
             path="/lecturer"
@@ -38,6 +60,35 @@ export default function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* Lecturer Analytics */}
+          <Route
+            path="/lecturer/analytics"
+            element={
+              <ProtectedRoute allowedRoles={["lecturer"]}>
+                <LecturerAnalyticsOverview />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/lecturer/analytics/class/:class_id"
+            element={
+              <ProtectedRoute allowedRoles={["lecturer"]}>
+                <LecturerClassAnalytics />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Lecturer Class Detail */}
+          <Route
+            path="/lecturer/class/:class_id"
+            element={
+              <ProtectedRoute allowedRoles={["lecturer"]}>
+                <LecturerClassDetail />
+              </ProtectedRoute>
+            }
+          />
+        </Routes>
 
           {/* Admin Only */}
           <Route
@@ -56,17 +107,6 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-
-          {/* Lecturer Class Detail */}
-          <Route
-            path="/lecturer/class/:class_id"
-            element={
-              <ProtectedRoute allowedRoles={["lecturer"]}>
-                <LecturerClassDetail />
-              </ProtectedRoute>
-            }
-          />
-        </Routes>
       </AuthProvider>
     </BrowserRouter>
   );

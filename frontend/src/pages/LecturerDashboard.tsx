@@ -276,6 +276,15 @@ export default function LecturerDashboard() {
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">Lecturer Dashboard</h1>
+          <div className="flex items-center gap-4">
+          <button
+            onClick={() => navigate("/lecturer/analytics")}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg transition"
+          >
+            Analytics
+          </button>
+
+          {/* Logout Button */}
           <button
             onClick={handleLogout}
             className="px-4 py-2 bg-red-600 hover:bg-red-500 rounded-lg transition"
@@ -283,7 +292,6 @@ export default function LecturerDashboard() {
             Logout
           </button>
         </div>
-
         {/* Welcome Card */}
         <div className="bg-[#181818]/80 backdrop-blur-xl p-6 rounded-2xl border border-white/10 mb-6">
           <h2 className="text-xl mb-2">Welcome, {user?.name}!</h2>
