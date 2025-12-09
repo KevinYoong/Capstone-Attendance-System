@@ -531,5 +531,199 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
   }
 });
 
+// Lecturer analytics endpoint (Per-class detailed)
+router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: Response) => {
+  const { class_id } = req.params;
+
+  try {
+    // 1. Get active semester
+    const [semRows] = await db.query<any[]>(
+      `SELECT * FROM Semester WHERE status='active' LIMIT 1`
+    );
+    if (semRows.length === 0)
+      return res.status(404).json({ success: false, message: "No active semester found" });
+
+    const semester = semRows[0];
+
+    // 2. Get all students enrolled in this class
+    const [studentRows] = await db.query<any[]>(
+      `
+      SELECT s.student_id, s.name, s.email
+      FROM StudentClass sc
+      JOIN Student s ON s.student_id = sc.student_id
+      WHERE sc.class_id = ?
+      ORDER BY s.name
+      `,
+      [class_id]
+    );
+
+    // 3. Get all sessions
+    const [sessions] = await db.query<any[]>(
+      `
+      SELECT session_id, started_at, expires_at, online_mode, is_expired
+      FROM Session
+      WHERE class_id = ?
+        AND started_at BETWEEN ? AND ?
+      ORDER BY started_at ASC
+      `,
+      [class_id, semester.start_date, semester.end_date]
+    );
+
+    const sessionDetails: any[] = [];
+    const studentMap: Record<number, any> = {};
+
+    studentRows.forEach((st) => {
+      studentMap[st.student_id] = {
+        student_id: st.student_id,
+        name: st.name,
+        email: st.email,
+        present_count: 0,
+        missed_count: 0,
+      };
+    });
+
+    // Count per session + update student totals
+    for (const sess of sessions) {
+      const [presentRows] = await db.query<any[]>(
+        `SELECT student_id FROM Checkin WHERE session_id = ?`,
+        [sess.session_id]
+      );
+
+      const presentList = presentRows.map((r) => r.student_id);
+      const presentCount = presentList.length;
+      const total = studentRows.length;
+      const missedCount = total - presentCount;
+
+      // Update student aggregates
+      studentRows.forEach((st) => {
+        if (presentList.includes(st.student_id)) {
+          studentMap[st.student_id].present_count++;
+        } else {
+          studentMap[st.student_id].missed_count++;
+        }
+      });
+
+      sessionDetails.push({
+        session_id: sess.session_id,
+        date: sess.started_at,
+        present_count: presentCount,
+        missed_count: missedCount,
+        attendance_rate: total === 0 ? 0 : Math.round((presentCount / total) * 100),
+        online_mode: !!sess.online_mode
+      });
+    }
+
+    // Build student list with rates
+    const studentList = Object.values(studentMap).map((s: any) => {
+      const total = s.present_count + s.missed_count;
+      const rate = total === 0 ? 0 : Math.round((s.present_count / total) * 100);
+
+      let status: "good" | "warning" | "critical";
+      if (rate >= 90) status = "good";
+      else if (rate >= 80) status = "warning";
+      else status = "critical";
+
+      return { ...s, attendance_rate: rate, attendance_status: status };
+    });
+
+    // Sort least-attending students
+    const leastAttending = [...studentList].sort(
+      (a, b) => a.attendance_rate - b.attendance_rate
+    );
+
+    return res.json({
+      success: true,
+      summary: {
+        total_sessions: sessions.length,
+        present_total: studentList.reduce((a, s) => a + s.present_count, 0),
+        missed_total: studentList.reduce((a, s) => a + s.missed_count, 0),
+      },
+      students: studentList,
+      sessions: sessionDetails,
+      least_attending: leastAttending.slice(0, 5)
+    });
+
+  } catch (err) {
+    console.error("Class analytics error:", err);
+    return res.status(500).json({ success: false, message: "Error loading class analytics" });
+  }
+});
+
+// Export class analytics as CSV
+router.get("/:lecturer_id/analytics/class/:class_id/export.csv", async (req: Request, res: Response) => {
+  const { class_id } = req.params;
+  const type = (req.query.type as string) || "students";
+
+  try {
+    // (Reuse analytics logic here)
+    const [studentRows] = await db.query<any[]>(
+      `SELECT s.student_id, s.name, s.email
+       FROM StudentClass sc
+       JOIN Student s ON s.student_id = sc.student_id
+       WHERE sc.class_id = ?
+       ORDER BY s.name`,
+      [class_id]
+    );
+
+    const [sessions] = await db.query<any[]>(
+      `SELECT session_id, started_at
+       FROM Session
+       WHERE class_id = ?
+       ORDER BY started_at ASC`,
+      [class_id]
+    );
+
+    if (type === "students") {
+      // Build student summary CSV
+      let csv = "student_id,name,email,present_count,missed_count,attendance_rate,status\n";
+
+      for (const st of studentRows) {
+        const [presentRows] = await db.query<any[]>(
+          `SELECT COUNT(*) AS count
+           FROM Checkin
+           WHERE student_id = ? AND session_id IN (
+             SELECT session_id FROM Session WHERE class_id = ?
+           )`,
+          [st.student_id, class_id]
+        );
+
+        const present = presentRows[0].count;
+        const missed = sessions.length - present;
+        const rate = sessions.length === 0 ? 0 : Math.round((present / sessions.length) * 100);
+
+        const status = rate >= 90 ? "good" : rate >= 80 ? "warning" : "critical";
+
+        csv += `${st.student_id},${st.name},${st.email},${present},${missed},${rate},${status}\n`;
+      }
+
+      res.setHeader("Content-Type", "text/csv");
+      return res.send(csv);
+    }
+
+    // type = sessions
+    let csv = "session_id,date,present_count,missed_count,attendance_rate\n";
+
+    for (const sess of sessions) {
+      const [presentRows] = await db.query<any[]>(
+        `SELECT COUNT(*) AS count FROM Checkin WHERE session_id = ?`,
+        [sess.session_id]
+      );
+
+      const present = presentRows[0].count;
+      const total = studentRows.length;
+      const missed = total - present;
+      const rate = total === 0 ? 0 : Math.round((present / total) * 100);
+
+      csv += `${sess.session_id},${sess.started_at},${present},${missed},${rate}\n`;
+    }
+
+    res.setHeader("Content-Type", "text/csv");
+    return res.send(csv);
+
+  } catch (err) {
+    console.error("CSV export error:", err);
+    return res.status(500).json({ success: false, message: "CSV export failed" });
+  }
+});
 
 export default router;

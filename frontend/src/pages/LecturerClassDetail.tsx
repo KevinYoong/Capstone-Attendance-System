@@ -36,6 +36,16 @@ export default function LecturerClassDetail() {
   const [session, setSession] = useState<Session | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
+  const now = new Date();
+  const hasPreviousSession = session !== null;
+  const isActiveSession =
+    session &&
+    !session.is_expired &&
+    new Date(session.expires_at) > now;
+
+  const isExpiredSession =
+    session &&
+    (session.is_expired || new Date(session.expires_at) <= now);
 
   const fetchDetails = useCallback(async () => {
     if (!class_id) return;
@@ -141,9 +151,11 @@ export default function LecturerClassDetail() {
       });
 
     setSession({
-    session_id: res.data.session_id,
-    started_at: res.data.started_at,
-    expires_at: res.data.expires_at,
+      session_id: Number(res.data.session_id),
+      started_at: res.data.started_at,
+      expires_at: res.data.expires_at,
+      online_mode: !!res.data.online_mode,
+      is_expired: !!res.data.is_expired,
     });
 
     // Immediately refresh to ensure checkins and students reflect latest state
@@ -206,18 +218,32 @@ export default function LecturerClassDetail() {
         </div>
 
         <div className="mt-4">
-         {session ? (
-          <p className="text-yellow-400 font-semibold">
-            🟡 Active until {new Date(session.expires_at).toLocaleTimeString()}
-            <br />
-            Attendance: {
-              students.filter(s => s.status === "checked-in").length
-            } / {students.length}
-          </p>
-          ) : (
-          <button onClick={handleActivateCheckIn} className="px-4 py-2 bg-green-600 rounded hover:bg-green-500">
-          Activate Check-in
-          </button>
+          {/* 🟡 ACTIVE SESSION */}
+          {isActiveSession && (
+            <p className="text-yellow-400 font-semibold">
+              🟡 Active until {new Date(session!.expires_at).toLocaleTimeString()} 
+              <br />
+              Attendance: {students.filter(s => s.status === "checked-in").length} / {students.length}
+            </p>
+          )}
+
+          {/* 🔵 PREVIOUSLY ACTIVATED (expired session) */}
+          {!isActiveSession && hasPreviousSession && (
+            <div className="text-blue-400 font-semibold">
+              🔵 Previously Activated
+              <br />
+              Last session: {new Date(session!.started_at).toLocaleString()}
+            </div>
+          )}
+
+          {/* 🟢 ACTIVATE CHECK-IN (only if never activated before) */}
+          {!isActiveSession && !hasPreviousSession && (
+            <button
+              onClick={handleActivateCheckIn}
+              className="px-4 py-2 bg-green-600 rounded hover:bg-green-500"
+            >
+              Activate Check-in
+            </button>
           )}
         </div>
       </div>

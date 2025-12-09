@@ -418,6 +418,7 @@ router.post("/checkin", async (req: Request, res: Response) => {
   }
 });
 
+// Student analytics endpoint (Semester overview)
 router.get("/:student_id/analytics", async (req: Request, res: Response) => {
   const { student_id } = req.params;
 
@@ -433,11 +434,15 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
 
     const semester = semRows[0];
 
-    // 2) Get the student's enrolled classes
+    // 2) Get classes the student is enrolled in
     const [classRows] = await db.query<any[]>(
       `
-      SELECT c.class_id, c.class_name, c.course_code, c.class_type, c.lecturer_id,
-             l.name AS lecturer_name
+      SELECT 
+        c.class_id, 
+        c.class_name, 
+        c.course_code,
+        c.class_type,
+        l.name AS lecturer_name
       FROM StudentClass sc
       JOIN Class c ON c.class_id = sc.class_id
       JOIN Lecturer l ON l.lecturer_id = c.lecturer_id
@@ -455,13 +460,13 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
       });
     }
 
-    const results: any[] = [];
+    const summaryResults: any[] = [];
 
-    // 3) For each class → get sessions for this semester
+    // 3) For each class → summarize attendance
     for (const cls of classRows) {
       const [sessions] = await db.query<any[]>(
         `
-        SELECT s.session_id, s.started_at, s.expires_at, s.is_expired, s.online_mode
+        SELECT s.session_id, s.started_at, s.is_expired
         FROM Session s
         WHERE s.class_id = ?
           AND s.started_at BETWEEN ? AND ?
@@ -473,13 +478,10 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
       let presentCount = 0;
       let missedCount = 0;
 
-      // Session detail list per class
-      const sessionDetails: any[] = [];
-
       for (const sess of sessions) {
         const [check] = await db.query<any[]>(
           `
-          SELECT *
+          SELECT checkin_id
           FROM Checkin
           WHERE session_id = ?
             AND student_id = ?
@@ -488,39 +490,152 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
           [sess.session_id, student_id]
         );
 
-        const isPresent = check.length > 0;
-
-        if (isPresent) presentCount++;
+        if (check.length > 0) presentCount++;
         else missedCount++;
-
-        sessionDetails.push({
-          session_id: sess.session_id,
-          started_at: sess.started_at,
-          expires_at: sess.expires_at,
-          was_present: isPresent,
-          status: isPresent ? "present" : "missed",
-          online_mode: !!sess.online_mode,
-          is_expired: !!sess.is_expired
-        });
       }
 
-      const totalSessions = presentCount + missedCount;
-      const attendanceRate = totalSessions === 0
-        ? 0
-        : Math.round((presentCount / totalSessions) * 100);
+      const total = presentCount + missedCount;
+      const rate = total === 0 ? 0 : Math.round((presentCount / total) * 100);
 
-      // Determine attendance status
       let status: "good" | "warning" | "critical";
-      if (attendanceRate >= 90) status = "good";
-      else if (attendanceRate >= 80) status = "warning";
+      if (rate >= 90) status = "good";
+      else if (rate >= 80) status = "warning";
       else status = "critical";
 
-      results.push({
+      summaryResults.push({
         class_id: cls.class_id,
         class_name: cls.class_name,
         course_code: cls.course_code,
-        class_type: cls.class_type,
         lecturer_name: cls.lecturer_name,
+
+        total_sessions: total,
+        present_count: presentCount,
+        missed_count: missedCount,
+
+        attendance_rate: rate,
+        attendance_status: status,
+      });
+    }
+
+    return res.json({
+      success: true,
+      semester,
+      classes: summaryResults
+    });
+
+  } catch (err) {
+    console.error("Error fetching student analytics:", err);
+    return res.status(500).json({ success: false, message: "Error loading student analytics" });
+  }
+});
+
+// Student analytics endpoint (Per-class detailed)
+router.get("/:student_id/analytics/class/:class_id", async (req: Request, res: Response) => {
+  const { student_id, class_id } = req.params;
+
+  try {
+    // 1) Get active semester
+    const [semRows] = await db.query<any[]>(
+      `SELECT * FROM Semester WHERE status = 'active' LIMIT 1`
+    );
+
+    if (semRows.length === 0) {
+      return res.status(404).json({ success: false, message: "No active semester found" });
+    }
+
+    const semester = semRows[0];
+
+    // 2) Validate student enrollment in this class
+    const [enrollmentRows] = await db.query<any[]>(
+      `
+      SELECT c.class_id, c.class_name, c.course_code, c.class_type,
+             l.name AS lecturer_name
+      FROM StudentClass sc
+      JOIN Class c ON c.class_id = sc.class_id
+      JOIN Lecturer l ON l.lecturer_id = c.lecturer_id
+      WHERE sc.student_id = ? AND sc.class_id = ?
+      `,
+      [student_id, class_id]
+    );
+
+    if (enrollmentRows.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: "Student is not enrolled in this class"
+      });
+    }
+
+    const classInfo = enrollmentRows[0];
+
+    // 3) Get all sessions for this class in this semester
+    const [sessions] = await db.query<any[]>(
+      `
+      SELECT s.session_id, s.started_at, s.expires_at, s.is_expired, s.online_mode
+      FROM Session s
+      WHERE s.class_id = ?
+        AND s.started_at BETWEEN ? AND ?
+      ORDER BY s.started_at ASC
+      `,
+      [class_id, semester.start_date, semester.end_date]
+    );
+
+    let presentCount = 0;
+    let missedCount = 0;
+    const sessionDetails: any[] = [];
+
+    // 4) Check attendance for each session
+    for (const sess of sessions) {
+      const [check] = await db.query<any[]>(
+        `
+        SELECT checkin_id
+        FROM Checkin
+        WHERE session_id = ?
+          AND student_id = ?
+        LIMIT 1
+        `,
+        [sess.session_id, student_id]
+      );
+
+      const isPresent = check.length > 0;
+
+      if (isPresent) presentCount++;
+      else missedCount++;
+
+      sessionDetails.push({
+        session_id: sess.session_id,
+        started_at: sess.started_at,
+        expires_at: sess.expires_at,
+        online_mode: !!sess.online_mode,
+
+        status: isPresent ? "present" : "missed"
+      });
+    }
+
+    const totalSessions = presentCount + missedCount;
+    const attendanceRate = totalSessions === 0
+      ? 0
+      : Math.round((presentCount / totalSessions) * 100);
+
+    // 5) Status classification
+    let status: "good" | "warning" | "critical";
+    if (attendanceRate >= 90) status = "good";
+    else if (attendanceRate >= 80) status = "warning";
+    else status = "critical";
+
+    // 6) Insights (optional but extremely useful)
+    const WEEKS_TOTAL = 14; // from your semester data model
+    const totalExpectedSessions = totalSessions; // based on sessions created so far
+    const remainingSessions = 14 - sessionDetails.length;
+
+    const projectedIfPerfect = Math.round(
+      ((presentCount + remainingSessions) / (totalSessions + remainingSessions)) * 100
+    );
+
+    return res.json({
+      success: true,
+      semester,
+      class: {
+        ...classInfo,
 
         total_sessions: totalSessions,
         present_count: presentCount,
@@ -528,19 +643,23 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
         attendance_rate: attendanceRate,
         attendance_status: status,
 
-        sessions: sessionDetails
-      });
-    }
+        sessions: sessionDetails,
 
-    return res.json({
-      success: true,
-      semester,
-      classes: results
+        insights: {
+          remaining_sessions: remainingSessions,
+          projected_final_rate_if_attend_all_remaining: projectedIfPerfect,
+          is_at_risk: attendanceRate < 80,
+          is_warning: attendanceRate >= 80 && attendanceRate < 90
+        }
+      }
     });
 
   } catch (err) {
-    console.error("Error fetching student analytics:", err);
-    return res.status(500).json({ success: false, message: "Error loading student analytics" });
+    console.error("Error fetching class analytics:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Error fetching class analytics"
+    });
   }
 });
 
