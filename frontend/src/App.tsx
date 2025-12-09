@@ -11,6 +11,7 @@ import AdminSemesters from "./pages/admin/AdminSemesters";
 import LecturerClassDetail from "./pages/LecturerClassDetail";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+
 import StudentAnalyticsOverview from "./pages/analytics/StudentAnalyticsOverview";
 import StudentClassAnalytics from "./pages/analytics/StudentClassAnalytics";
 import LecturerAnalyticsOverview from "./pages/analytics/LecturerAnalyticsOverview";
@@ -32,8 +33,6 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-
-          {/* Student Analytics */}
           <Route
             path="/student/analytics"
             element={
@@ -60,8 +59,6 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-
-          {/* Lecturer Analytics */}
           <Route
             path="/lecturer/analytics"
             element={
@@ -78,8 +75,6 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-
-          {/* Lecturer Class Detail */}
           <Route
             path="/lecturer/class/:class_id"
             element={
@@ -88,25 +83,24 @@ export default function App() {
               </ProtectedRoute>
             }
           />
-        </Routes>
 
           {/* Admin Only */}
           <Route
             path="/admin/*"
             element={
               <ProtectedRoute allowedRoles={["admin"]}>
-                <AdminLayout>
-                  <Routes>
-                    <Route path="" element={<AdminDashboard />} />
-                    <Route path="semesters" element={<AdminSemesters />} />
-                    <Route path="students" element={<AdminStudents />} />
-                    <Route path="lecturers" element={<AdminLecturers />} />
-                    <Route path="classes" element={<AdminClasses />} />
-                  </Routes>
-                </AdminLayout>
+                <AdminLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<AdminDashboard />} />
+            <Route path="semesters" element={<AdminSemesters />} />
+            <Route path="students" element={<AdminStudents />} />
+            <Route path="lecturers" element={<AdminLecturers />} />
+            <Route path="classes" element={<AdminClasses />} />
+          </Route>
+
+        </Routes>
       </AuthProvider>
     </BrowserRouter>
   );
