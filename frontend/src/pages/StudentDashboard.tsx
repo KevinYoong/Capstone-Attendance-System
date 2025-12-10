@@ -339,8 +339,17 @@ export default function StudentDashboard() {
 
     navigator.geolocation.getCurrentPosition(
       async (position) => {
-        // Successfully got location
         const { latitude, longitude, accuracy } = position.coords;
+
+        // Log location for testing 
+        console.log(
+          "📍 Student Location:",
+          {
+            latitude,
+            longitude,
+            accuracy
+          }
+        );
 
         try {
           const response = await axios.post('http://localhost:3001/student/checkin', {

@@ -38,6 +38,16 @@ interface SessionRow extends RowDataPacket {
   online_mode: boolean;
 }
 
+interface SemesterRow extends RowDataPacket {
+  start_date: string;
+  end_date?: string;
+}
+
+function getAcademicWeek(startDate: Date, targetDate: Date): number {
+  const diff = targetDate.getTime() - startDate.getTime();
+  return Math.floor(diff / (7 * 24 * 60 * 60 * 1000)) + 1;
+}
+
 // ----- ROUTES -----
 
 // Get weekly schedule for a lecturer
@@ -94,7 +104,7 @@ router.get("/class/:class_id/active-session", async (req: Request, res: Response
     // Find the active (not expired) session for this class (if exists)
     const [activeRows] = await db.query<any[]>(
       `
-      SELECT session_id, class_id, started_at, expires_at, online_mode, is_expired
+      SELECT session_id, class_id, started_at, expires_at, online_mode, is_expired, week_number
       FROM Session
       WHERE class_id = ?
         AND (is_expired = 0 OR is_expired IS NULL)
@@ -173,7 +183,7 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
     for (const c of classRows) {
       const [sessions] = await db.query<any[]>(
         `
-        SELECT s.session_id, s.class_id, s.started_at, s.expires_at, s.online_mode, s.is_expired
+        SELECT s.session_id, s.class_id, s.started_at, DATE(s.started_at) AS started_date, s.expires_at, s.online_mode, s.is_expired, s.week_number
         FROM Session s
         WHERE s.class_id = ?
           AND s.started_at BETWEEN ? AND ?
@@ -251,10 +261,22 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
     );
 
     // Get latest session (if any)
-    const [sessionRows] = await db.query<SessionRow[]>(
-      `SELECT * FROM Session WHERE class_id = ? ORDER BY started_at DESC LIMIT 1`,
-      [class_id]
+    const [semesterRows] = await db.query<any[]>(
+      `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
     );
+
+    const semester = semesterRows[0];
+
+    const [sessionRows] = await db.query<SessionRow[]>(
+      `SELECT *
+      FROM Session
+      WHERE class_id = ?
+        AND started_at BETWEEN ? AND ?
+      ORDER BY started_at DESC
+      LIMIT 1`,
+      [class_id, semester.start_date, semester.end_date]
+    );
+
     const latestSession = sessionRows.length > 0 ? sessionRows[0] : null;
 
     // Get check-ins for this session
@@ -295,12 +317,21 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     );
 
     // 2) Check if there is an active session that hasn't expired (avoid duplicates)
+    const [semesterRows] = await conn.query(
+      `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
+    );
+
+    const semester = semesterRows[0];
+
     const [activeRows] = await conn.query(
       `SELECT session_id, started_at, expires_at, online_mode
-      FROM Session 
-      WHERE class_id = ? AND is_expired = 0 AND expires_at > NOW() 
+      FROM Session
+      WHERE class_id = ?
+        AND is_expired = 0
+        AND expires_at > NOW()
+        AND started_at BETWEEN ? AND ?
       ORDER BY started_at DESC LIMIT 1`,
-      [class_id]
+      [class_id, semester.start_date, semester.end_date]
     );
 
     if (activeRows.length > 0) {
@@ -320,13 +351,19 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     // 3) Create new session
     const startedAt = new Date();
     const expiresAt = new Date(startedAt.getTime() + 2 * 60000); 
+    // Load semester start date
+    const [semRows] = await db.query<SemesterRow[]>(
+      `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`
+    );
+    const semesterStart = new Date(semRows[0].start_date);
+    const weekNumber = getAcademicWeek(semesterStart, startedAt);
     const { online_mode } = req.body;
     const isOnlineMode: boolean = online_mode === true;
 
     const [result] = await conn.query(
-      `INSERT INTO Session (class_id, started_at, expires_at, online_mode, is_expired)
-       VALUES (?, ?, ?, ?, 0)`,
-      [class_id, startedAt, expiresAt, isOnlineMode ? 1 : 0]
+      `INSERT INTO Session (class_id, started_at, expires_at, online_mode, is_expired, week_number)
+      VALUES (?, ?, ?, ?, 0, ?)`,
+      [class_id, startedAt, expiresAt, isOnlineMode ? 1 : 0, weekNumber]
     );
 
     const session_id = (result as any).insertId;
@@ -372,7 +409,7 @@ router.post("/session/:session_id/manual-checkin", async (req: Request, res: Res
   try {
     // 1) Validate session exists
     const [sessionRows] = await db.query<any[]>(
-      `SELECT session_id, class_id, expires_at, is_expired 
+      `SELECT session_id, class_id, expires_at, online_mode, is_expired, week_number
        FROM Session 
        WHERE session_id = ?`,
       [session_id]
