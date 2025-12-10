@@ -34,6 +34,24 @@ interface Semester {
   status: string;
 }
 
+// Compute academic week based on semester start date and today's date
+function getCurrentAcademicWeek(startDateStr: string): number {
+  const startDate = new Date(startDateStr);
+  const today = new Date();
+
+  // Normalize times to midnight
+  startDate.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+
+  // Week 1 = days 0–6 → week = 1 + (days / 7)
+  const week = Math.floor(diffDays / 7) + 1;
+
+  // Clamp range 1–14
+  return Math.max(1, Math.min(14, week));
+}
+
 export default function StudentDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -183,8 +201,17 @@ export default function StudentDashboard() {
           "http://localhost:3001/semester/current"
         );
         if (res.data.success) {
-          setSemester(res.data.data);
-          setSelectedWeek(res.data.data.current_week);
+          const sem = res.data.data;
+          // compute current week client-side to avoid stale DB value
+          const computedWeek = getCurrentAcademicWeek(sem.start_date);
+          // set semester and selected week using computed value
+          setSemester({
+            ...sem,
+            current_week: computedWeek
+          });
+          // prefer computed week as the default
+          setSelectedWeek(computedWeek);
+          // after setting semester/selectedWeek, fetch attendance summary
           await fetchAttendanceSemester();
         }
       } catch (err) {
@@ -195,8 +222,6 @@ export default function StudentDashboard() {
     };
 
     fetchSemester();
-    fetchSchedule(); 
-
     // 3) **new**: fetch active sessions immediately (so newly-logged students see already-activated sessions)
     fetchActiveSessions();
 
@@ -250,7 +275,7 @@ export default function StudentDashboard() {
       socket.off("sessionExpired");
       socket.emit("leaveStudentRooms", user.id);
     };
-  }, [user, fetchSchedule, fetchActiveSessions]);
+  }, [user, fetchActiveSessions]);
 
   useEffect(() => {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
@@ -581,10 +606,31 @@ export default function StudentDashboard() {
                   // Determine status
                   const isCheckedIn = sessionForThisWeek?.student_status === "present";
                   const isMissed = sessionForThisWeek?.student_status === "missed";
-                  const isActive =
-                    activeSessions[cls.class_id] !== undefined &&
-                    !isCheckedIn &&
-                    !isMissed;
+
+                  // --- FIX: Only activate if session date matches THIS week's date ---
+                  let isActive = false;
+
+                  const active = activeSessions[cls.class_id];
+                  if (active) {
+                    // Compute the exact date this class should occur in the selected week
+                    const dayIndex = {
+                      Monday: 0,
+                      Tuesday: 1,
+                      Wednesday: 2,
+                      Thursday: 3,
+                      Friday: 4
+                    }[day] ?? 0;
+
+                    const semesterStart = new Date(semester.start_date);
+                    const targetDate = new Date(semesterStart);
+                    targetDate.setDate(semesterStart.getDate() + (selectedWeek - 1) * 7 + dayIndex);
+
+                    const targetDateStr = targetDate.toISOString().split("T")[0];
+                    const activeDateStr = new Date(active.expiresAt).toISOString().split("T")[0];
+
+                    // Active ONLY if session is on the SAME exact date
+                    isActive = activeDateStr === targetDateStr && !isCheckedIn && !isMissed;
+                  }
 
                   return (
                     <div

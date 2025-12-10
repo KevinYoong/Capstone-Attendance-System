@@ -86,23 +86,6 @@ export default function LecturerClassDetail() {
           : null
       );
 
-      console.log("📌 RAW DEBUG");
-      console.log("sessionDate (from dashboard state):", sessionDate);
-      console.log("typeof sessionDate:", typeof sessionDate);
-
-      console.log("session (backend raw):", rawSession);
-
-      if (rawSession) {
-        console.log("rawSession.started_at:", rawSession.started_at);
-        console.log("new Date(rawSession.started_at):", new Date(rawSession.started_at));
-        console.log(
-          "new Date(rawSession.started_at).toISOString():",
-          new Date(rawSession.started_at).toISOString()
-        );
-      }
-
-      console.log("--------");
-
       if (rawSession) {
         setOnlineMode(rawSession.online_mode === true);
       }
