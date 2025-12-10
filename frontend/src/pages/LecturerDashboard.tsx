@@ -179,11 +179,13 @@ export default function LecturerDashboard() {
               // Backend now returns started_date in YYYY-MM-DD format
               const sessionDate = session.started_date;
               const key = `${c.class_id}_${sessionDate}`;
+              console.log(`[DEBUG] Adding past session: ${key}`);
               set.add(key);
             });
           }
         });
 
+        console.log('[DEBUG] Past activated sessions:', Array.from(set));
         setPastActivatedSessions(set);
       } catch (err) {
         console.error("Error fetching past activations:", err);
@@ -473,39 +475,45 @@ export default function LecturerDashboard() {
                 {classes.length === 0 ? (
                   <p className="text-gray-400 px-4 py-2 text-center">No classes today.</p>
                 ) : (
-                  classes.map((cls, idx) => (
-                    <div
-                      key={cls.class_id}
-                      className={`px-4 py-3 ${
-                        idx < classes.length - 1 ? 'border-b border-white/20' : ''
-                      } flex flex-col md:flex-row justify-between items-start md:items-center gap-2`}
-                    >
-                      <div>
-                        <h3 className="font-semibold text-lg">
-                          {cls.class_name} ({cls.course_code})
-                        </h3>
-                        <p className="text-gray-400">
-                          {cls.start_time} - {cls.end_time} ({cls.class_type})
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleActivateCheckIn(cls.class_id)}
-                        className={`mt-2 md:mt-0 px-4 py-2 text-white rounded-lg transition ${
-                          activeSessions[cls.class_id]
-                            ? "bg-green-600 hover:bg-green-500"
-                            : pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`)
-                              ? "bg-blue-600 hover:bg-blue-500"
-                              : "bg-gray-500 hover:bg-gray-400"
-                        }`}
+                  classes.map((cls, idx) => {
+                    const dateKey = `${cls.class_id}_${getFullDateForDay(day)}`;
+                    const isPastActivated = pastActivatedSessions.has(dateKey);
+                    console.log(`[DEBUG] ${day} ${cls.class_name}: checking ${dateKey} = ${isPastActivated}`);
+
+                    return (
+                      <div
+                        key={cls.class_id}
+                        className={`px-4 py-3 ${
+                          idx < classes.length - 1 ? 'border-b border-white/20' : ''
+                        } flex flex-col md:flex-row justify-between items-start md:items-center gap-2`}
                       >
-                        {activeSessions[cls.class_id]
-                          ? "Active Now"
-                          : pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`)
-                            ? "Previously Activated"
-                            : "Activate Check-In"}
-                      </button>
-                    </div>
-                  ))
+                        <div>
+                          <h3 className="font-semibold text-lg">
+                            {cls.class_name} ({cls.course_code})
+                          </h3>
+                          <p className="text-gray-400">
+                            {cls.start_time} - {cls.end_time} ({cls.class_type})
+                          </p>
+                        </div>
+                        <button
+                          onClick={() => handleActivateCheckIn(cls.class_id)}
+                          className={`mt-2 md:mt-0 px-4 py-2 text-white rounded-lg transition ${
+                            activeSessions[cls.class_id]
+                              ? "bg-green-600 hover:bg-green-500"
+                              : isPastActivated
+                                ? "bg-blue-600 hover:bg-blue-500"
+                                : "bg-gray-500 hover:bg-gray-400"
+                          }`}
+                        >
+                          {activeSessions[cls.class_id]
+                            ? "Active Now"
+                            : isPastActivated
+                              ? "Previously Activated"
+                              : "Activate Check-In"}
+                        </button>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
