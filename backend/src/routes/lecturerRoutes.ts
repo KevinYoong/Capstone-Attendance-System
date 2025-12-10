@@ -385,7 +385,10 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
     // 3) Create new session
     const startedAt = new Date();
-    const expiresAt = new Date(startedAt.getTime() + 2 * 60000); 
+    console.log("🔥 SERVER TIME CHECK");
+    console.log("new Date() =", startedAt);
+    console.log("toISOString() =", startedAt.toISOString());
+    const expiresAt = new Date(startedAt.getTime() + 30 * 1000); 
     // Load semester start date
     const [semRows] = await db.query<SemesterRow[]>(
       `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`

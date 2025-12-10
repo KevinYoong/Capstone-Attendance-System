@@ -57,7 +57,7 @@ export default function LecturerClassDetail() {
     });
   };
 
-  const fetchDetails = useCallback(async () => {
+  const fetchDetails = useCallback(async (forceIgnoreDate = false) => {
     if (!class_id) return;
     try {
       setLoading(true);
@@ -65,9 +65,7 @@ export default function LecturerClassDetail() {
       const res = await axios.get(
         `http://localhost:3001/lecturer/class/${class_id}/details`,
         {
-          params: {
-            date: sessionDate ?? undefined
-          }
+          params: forceIgnoreDate ? {} : { date: sessionDate ?? undefined }
         }
       );
 
@@ -94,14 +92,24 @@ export default function LecturerClassDetail() {
       const checkinMap = new Map(checkins.map((c: any) => [c.student_id, c.status]));
 
       setStudents(
-        (res.data.students || []).map((s: any) => ({
-          student_id: Number(s.student_id),
-          name: s.name,
-          email: s.email,
-          status: checkinMap.has(s.student_id)
-            ? "checked-in"
-            : (res.data.session?.is_expired ? "missed" : "pending"),
-        }))
+        (res.data.students || []).map((s: any) => {
+          const isCheckedIn = checkinMap.has(s.student_id);
+
+          let status: "checked-in" | "missed" | "pending" = "pending";
+
+          if (isCheckedIn) {
+            status = "checked-in";
+          } else if (rawSession?.is_expired) {
+            status = "missed";
+          }
+
+          return {
+            student_id: Number(s.student_id),
+            name: s.name,
+            email: s.email,
+            status,
+          };
+        })
       );
 
     } catch (err) {
@@ -152,9 +160,30 @@ export default function LecturerClassDetail() {
     socket.on("sessionExpired", onSessionExpired);
     socket.on("studentCheckedIn", onStudentCheckedIn);
 
+    const onCheckinActivated = async (data: any) => {
+      if (data.class_id !== id) return;
+      console.log("🟡 Session activated:", data);
+
+      // Update session state
+      setSession({
+        session_id: data.session_id,
+        started_at: data.startedAt,
+        expires_at: data.expiresAt,
+        online_mode: !!data.online_mode,
+        is_expired: false,
+      });
+
+      // Refresh page details
+      await fetchDetails(true);
+    };
+
+    socket.on("checkinActivated", onCheckinActivated);
+
+
     return () => {
       socket.off("sessionExpired", onSessionExpired);
       socket.off("studentCheckedIn", onStudentCheckedIn);
+      socket.off("checkinActivated", onCheckinActivated);
       socket.emit("leaveLecturerRoom", id);
     };
   }, [class_id, fetchDetails]);
@@ -163,7 +192,7 @@ export default function LecturerClassDetail() {
     if (!class_id) return;
     try {
     const res = await axios.post(`http://localhost:3001/lecturer/class/${class_id}/activate-checkin`, {
-        online_mode: onlineMode
+        online_mode: onlineMode,
       });
 
     setSession({
@@ -175,13 +204,13 @@ export default function LecturerClassDetail() {
     });
 
     // Immediately refresh to ensure checkins and students reflect latest state
-    await fetchDetails();
+    await fetchDetails(true);
     } catch (err) {
     console.error("Error activating check-in:", err);
     }
   };
 
-  const [onlineMode, setOnlineMode] = useState<boolean>(true);
+  const [onlineMode, setOnlineMode] = useState<boolean>(false);
 
   const handleManualCheckIn = async (studentId: number) => {
     if (!session) return;
