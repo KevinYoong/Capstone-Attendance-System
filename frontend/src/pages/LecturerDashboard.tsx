@@ -284,7 +284,8 @@ export default function LecturerDashboard() {
     targetDate.setDate(semesterStart.getDate() + daysOffset);
 
     // Format as YYYY-MM-DD
-    return targetDate.toISOString().split('T')[0];
+    const isoString = targetDate.toISOString().split('T');
+    return isoString[0] || '';
   };
 
   const handleActivateCheckIn = (classId: number) => {
