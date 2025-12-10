@@ -47,8 +47,8 @@ export default function LecturerDashboard() {
   // Track which sessions are currently active (check-in activated)
   const [activeSessions, setActiveSessions] = useState<Record<number, boolean>>({});
 
-  // Track which classes had active sessions in past weeks
-  const [pastActivatedClasses, setPastActivatedClasses] = useState<Set<number>>(new Set());
+  // Track which classes had active sessions by class_id and date (format: "classId_YYYY-MM-DD")
+  const [pastActivatedSessions, setPastActivatedSessions] = useState<Set<string>>(new Set());
 
   // Semester and week navigation state
   const [semester, setSemester] = useState<Semester | null>(null);
@@ -148,15 +148,20 @@ export default function LecturerDashboard() {
         if (!res.data?.success) return;
 
         const classList = res.data.classes || [];
-        const set = new Set<number>();
+        const set = new Set<string>();
 
         classList.forEach((c: any) => {
           if (c.sessions && c.sessions.length > 0) {
-            set.add(c.class_id);
+            c.sessions.forEach((session: any) => {
+              // Extract just the date part (YYYY-MM-DD) from started_at timestamp
+              const sessionDate = new Date(session.started_at).toISOString().split('T')[0];
+              const key = `${c.class_id}_${sessionDate}`;
+              set.add(key);
+            });
           }
         });
 
-        setPastActivatedClasses(set);
+        setPastActivatedSessions(set);
       } catch (err) {
         console.error("Error fetching past activations:", err);
       }
@@ -264,6 +269,22 @@ export default function LecturerDashboard() {
 
     // Format as "Jan 6"
     return targetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  };
+
+  // Helper function to get full date in YYYY-MM-DD format for checking past activations
+  const getFullDateForDay = (dayName: string): string => {
+    if (!semester) return '';
+
+    const dayIndex = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 }[dayName] || 0;
+    const semesterStart = new Date(semester.start_date);
+
+    // Calculate days offset: (selectedWeek - 1) * 7 days + dayIndex
+    const daysOffset = (selectedWeek - 1) * 7 + dayIndex;
+    const targetDate = new Date(semesterStart);
+    targetDate.setDate(semesterStart.getDate() + daysOffset);
+
+    // Format as YYYY-MM-DD
+    return targetDate.toISOString().split('T')[0];
   };
 
   const handleActivateCheckIn = (classId: number) => {
@@ -446,14 +467,14 @@ export default function LecturerDashboard() {
                         className={`mt-2 md:mt-0 px-4 py-2 text-white rounded-lg transition ${
                           activeSessions[cls.class_id]
                             ? "bg-green-600 hover:bg-green-500"
-                            : pastActivatedClasses.has(cls.class_id)
+                            : pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`)
                               ? "bg-blue-600 hover:bg-blue-500"
                               : "bg-gray-500 hover:bg-gray-400"
                         }`}
                       >
                         {activeSessions[cls.class_id]
                           ? "Active Now"
-                          : pastActivatedClasses.has(cls.class_id)
+                          : pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`)
                             ? "Previously Activated"
                             : "Activate Check-In"}
                       </button>
