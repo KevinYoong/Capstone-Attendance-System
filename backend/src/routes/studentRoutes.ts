@@ -308,7 +308,7 @@ router.post("/checkin", async (req: Request, res: Response) => {
   try {
     // 1. Check if session exists and is still valid
     const [sessionRows] = await db.query<SessionRow[]>(
-      `SELECT session_id, class_id, started_at, expires_at, online_mode
+      `SELECT session_id, class_id, started_at, expires_at, online_mode, scheduled_date
        FROM Session
        WHERE session_id = ?`,
       [session_id]

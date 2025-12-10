@@ -142,6 +142,7 @@ router.get("/class/:class_id/active-session", async (req: Request, res: Response
         class_id: session.class_id,
         started_at: session.started_at,
         started_date: session.started_date ? session.started_date : (new Date(session.started_at)).toISOString().split('T')[0],
+        scheduled_date: session.scheduled_date,
         expires_at: session.expires_at,
         online_mode: !!session.online_mode,
         is_expired: !!session.is_expired,
@@ -395,13 +396,37 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     );
     const semesterStart = new Date(semRows[0].start_date);
     const weekNumber = getAcademicWeek(semesterStart, startedAt);
+    const [classRows] = await conn.query(
+      `SELECT day_of_week, start_time 
+      FROM Class 
+      WHERE class_id = ?`,
+      [class_id]
+    );
+
+    const cls = classRows[0];
+
+    const dayIndexMap = {
+      Monday: 0,
+      Tuesday: 1,
+      Wednesday: 2,
+      Thursday: 3,
+      Friday: 4,
+    } as const;
+
+    const dayIndex = dayIndexMap[cls.day_of_week as keyof typeof dayIndexMap];
+
+    // Compute scheduled date based on semesterStart + week number + class day
+    const scheduled = new Date(semesterStart);
+    scheduled.setDate(semesterStart.getDate() + (weekNumber - 1) * 7 + dayIndex);
+
+    const scheduled_date = scheduled.toISOString().split("T")[0];
     const { online_mode } = req.body;
     const isOnlineMode: boolean = online_mode === true;
 
     const [result] = await conn.query(
-      `INSERT INTO Session (class_id, started_at, expires_at, online_mode, is_expired, week_number)
-      VALUES (?, ?, ?, ?, 0, ?)`,
-      [class_id, startedAt, expiresAt, isOnlineMode ? 1 : 0, weekNumber]
+      `INSERT INTO Session (class_id, started_at, scheduled_date, expires_at, online_mode, is_expired, week_number)
+      VALUES (?, ?, ?, ?, ?, 0, ?)`,
+      [class_id, startedAt, scheduled_date, expiresAt, isOnlineMode ? 1 : 0, weekNumber]
     );
 
     const session_id = (result as any).insertId;
@@ -414,7 +439,8 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
       class_id: Number(class_id),
       session_id,
       startedAt: startedAt.toISOString(),
-      started_date: semesterStart ? startedAt.toISOString().split('T')[0] : startedAt.toISOString().split('T')[0],
+      started_date: scheduled_date,   
+      scheduled_date: scheduled_date, 
       expiresAt: expiresAt.toISOString(),
       online_mode: isOnlineMode,
       week_number: weekNumber
@@ -424,7 +450,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
       message: "Check-in activated",
       session_id,
       started_at: startedAt,
-      started_date: startedAt.toISOString().split('T')[0],
+      scheduled_date: scheduled_date,
       expires_at: expiresAt,
       online_mode: isOnlineMode,
       week_number: weekNumber
