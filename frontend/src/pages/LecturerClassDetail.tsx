@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import socket from "../utils/socket";
@@ -32,6 +32,10 @@ interface Session {
 export default function LecturerClassDetail() {
   const { class_id } = useParams<{ class_id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromWeek = location.state?.fromWeek;
+  const fromSemBreak = location.state?.fromSemBreak;
+  const sessionDate = location.state?.sessionDate;
   const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
@@ -44,57 +48,85 @@ export default function LecturerClassDetail() {
     !session.is_expired &&
     new Date(session.expires_at) > new Date();
 
-  const isExpiredSession =
-    session &&
-    (session.is_expired || new Date(session.expires_at) <= now);
+  const handleBack = () => {
+    navigate('/lecturer', {
+      state: {
+        restoreWeek: fromWeek,
+        restoreSemBreak: fromSemBreak
+      }
+    });
+  };
 
   const fetchDetails = useCallback(async () => {
     if (!class_id) return;
     try {
-    setLoading(true);
-    const res = await axios.get(`http://localhost:3001/lecturer/class/${class_id}/details`);
+      setLoading(true);
 
-    // backend shape: { classInfo, students, session, checkins }
-    setClassInfo(res.data.classInfo || null);
-
-    const rawSession = res.data.session;
-    setSession(
-      rawSession
-        ? {
-            session_id: Number(rawSession.session_id),
-            started_at: rawSession.started_at,
-            expires_at: rawSession.expires_at,
-            online_mode: !!rawSession.online_mode,
-            is_expired: !!rawSession.is_expired,
+      const res = await axios.get(
+        `http://localhost:3001/lecturer/class/${class_id}/details`,
+        {
+          params: {
+            date: sessionDate ?? undefined
           }
-        : null
-    );
+        }
+      );
 
-    if (res.data.session) {
-      setOnlineMode(res.data.session.online_mode === true);
-    }
+      setClassInfo(res.data.classInfo || null);
 
-    const checkins = res.data.checkins || [];
-    const checkinMap = new Map(
-      checkins.map((c: any) => [c.student_id, c.status])
-    );
+      const rawSession = res.data.session;
+      setSession(
+        rawSession
+          ? {
+              session_id: Number(rawSession.session_id),
+              started_at: rawSession.started_at,
+              expires_at: rawSession.expires_at,
+              online_mode: !!rawSession.online_mode,
+              is_expired: !!rawSession.is_expired,
+            }
+          : null
+      );
 
-    setStudents(
-      (res.data.students || []).map((s: any) => ({
-        student_id: Number(s.student_id),
-        name: s.name,
-        email: s.email,
-        status: checkinMap.has(s.student_id)
-          ? "checked-in"
-          : (res.data.session?.is_expired ? "missed" : "pending"),
+      console.log("📌 RAW DEBUG");
+      console.log("sessionDate (from dashboard state):", sessionDate);
+      console.log("typeof sessionDate:", typeof sessionDate);
+
+      console.log("session (backend raw):", rawSession);
+
+      if (rawSession) {
+        console.log("rawSession.started_at:", rawSession.started_at);
+        console.log("new Date(rawSession.started_at):", new Date(rawSession.started_at));
+        console.log(
+          "new Date(rawSession.started_at).toISOString():",
+          new Date(rawSession.started_at).toISOString()
+        );
+      }
+
+      console.log("--------");
+
+      if (rawSession) {
+        setOnlineMode(rawSession.online_mode === true);
+      }
+
+      const checkins = res.data.checkins || [];
+      const checkinMap = new Map(checkins.map((c: any) => [c.student_id, c.status]));
+
+      setStudents(
+        (res.data.students || []).map((s: any) => ({
+          student_id: Number(s.student_id),
+          name: s.name,
+          email: s.email,
+          status: checkinMap.has(s.student_id)
+            ? "checked-in"
+            : (res.data.session?.is_expired ? "missed" : "pending"),
         }))
       );
+
     } catch (err) {
-    console.error("Error fetching class details:", err);
+      console.error("Error fetching class details:", err);
     } finally {
-    setLoading(false);
+      setLoading(false);
     }
-  }, [class_id]);
+  }, [class_id, sessionDate]);
 
   // initial fetch
   useEffect(() => {
@@ -193,7 +225,7 @@ export default function LecturerClassDetail() {
 
   return (
     <div className="min-h-screen text-white p-8 bg-gradient-to-br from-[#0a0f1f] via-[#0d1b2a] to-[#051923]">
-      <button onClick={() => navigate(-1)} className="mb-4 px-4 py-2 bg-gray-600 rounded hover:bg-gray-500">
+      <button onClick={handleBack} className="mb-4 px-4 py-2 bg-gray-600 rounded hover:bg-gray-500">
         ← Back
       </button>
 
@@ -201,6 +233,7 @@ export default function LecturerClassDetail() {
         <h1 className="text-2xl font-bold mb-2">{classInfo?.class_name}</h1>
         <p>Course Code: {classInfo?.course_code}</p>
         <p>Day: {classInfo?.day_of_week}</p>
+        <p>Date: {sessionDate ? new Date(sessionDate).toLocaleDateString() : "—"}</p>
         <p>
           Time: {classInfo?.start_time} - {classInfo?.end_time} ({classInfo?.class_type})
         </p>

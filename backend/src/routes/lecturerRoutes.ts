@@ -53,7 +53,6 @@ function getAcademicWeek(startDate: Date, targetDate: Date): number {
 // Get weekly schedule for a lecturer
 router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => {
   const { lecturer_id } = req.params;
-  const { week } = req.query; // Accept week parameter (optional for now)
   const selectedWeek = req.query.week;
 
   if (selectedWeek === "break") {
@@ -245,17 +244,21 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
 // Get detailed class info
 router.get("/class/:class_id/details", async (req: Request, res: Response) => {
   const { class_id } = req.params;
+  const selectedDate = req.query.date as string | undefined;
 
   try {
-    // Get class info
     const [classRows] = await db.query<ClassRow[]>(
-      `SELECT * FROM Class WHERE class_id = ?`,
+      `SELECT 
+        c.*, 
+        l.name AS lecturer_name
+      FROM Class c
+      JOIN Lecturer l ON c.lecturer_id = l.lecturer_id
+      WHERE c.class_id = ?`,
       [class_id]
     );
     const classInfo = classRows[0];
     if (!classInfo) return res.status(404).json({ message: "Class not found" });
 
-    // Get enrolled students
     const [studentRows] = await db.query<StudentRow[]>(
       `
       SELECT Student.student_id, Student.name, Student.email
@@ -266,44 +269,70 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
       [class_id]
     );
 
-    // Get latest session (if any)
-    const [semesterRows] = await db.query<any[]>(
-      `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
-    );
-
-    const semester = semesterRows[0];
-
-    const [sessionRows] = await db.query<SessionRow[]>(
-      `SELECT *
-      FROM Session
-      WHERE class_id = ?
-        AND started_at BETWEEN ? AND ?
-      ORDER BY started_at DESC
-      LIMIT 1`,
-      [class_id, semester.start_date, semester.end_date]
-    );
-
-    const latestSession = sessionRows.length > 0 ? sessionRows[0] : null;
-
-    // Get check-ins for this session
+    // If frontend gives us a date → fetch session for EXACT date
+    let session: SessionRow | null = null;
     let checkins: CheckinRow[] = [];
-    if (latestSession) {
-      const [checkinRows] = await db.query<CheckinRow[]>(
-        `SELECT * FROM Checkin WHERE session_id = ?`,
-        [latestSession.session_id]
+
+    if (selectedDate) {
+      const [sessionRows] = await db.query<SessionRow[]>(
+        `
+        SELECT *
+        FROM Session
+        WHERE class_id = ?
+          AND DATE(started_at) = ?
+        LIMIT 1
+        `,
+        [class_id, selectedDate]
       );
-      checkins = checkinRows;
+
+      session = sessionRows.length > 0 ? sessionRows[0] : null;
+
+      if (session) {
+        const [checkinRows] = await db.query<CheckinRow[]>(
+          `SELECT * FROM Checkin WHERE session_id = ?`,
+          [session.session_id]
+        );
+        checkins = checkinRows;
+      }
+    } else {
+      // Fallback: get latest session in semester if no date provided
+      const [semesterRows] = await db.query<any[]>(
+        `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
+      );
+      const semester = semesterRows[0];
+
+      const [sessionRows] = await db.query<SessionRow[]>(
+        `
+        SELECT *
+        FROM Session
+        WHERE class_id = ?
+          AND started_at BETWEEN ? AND ?
+        ORDER BY started_at DESC
+        LIMIT 1
+        `,
+        [class_id, semester.start_date, semester.end_date]
+      );
+
+      session = sessionRows.length > 0 ? sessionRows[0] : null;
+
+      if (session) {
+        const [checkinRows] = await db.query<CheckinRow[]>(
+          `SELECT * FROM Checkin WHERE session_id = ?`,
+          [session.session_id]
+        );
+        checkins = checkinRows;
+      }
     }
 
-    res.json({
+    return res.json({
       classInfo,
       students: studentRows,
-      session: latestSession,
-      checkins,
+      session,
+      checkins
     });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Error retrieving class details" });
+    console.error("Error retrieving class details:", err);
+    return res.status(500).json({ message: "Error retrieving class details" });
   }
 });
 

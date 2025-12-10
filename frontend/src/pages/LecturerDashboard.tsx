@@ -1,5 +1,5 @@
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 
@@ -50,9 +50,21 @@ function getCurrentAcademicWeek(startDateStr: string): number {
   return Math.max(1, Math.min(14, week));
 }
 
+function formatLocalYMD(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export default function LecturerDashboard() {
   const { user, logout } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
+
+  const restoreWeek = location.state?.restoreWeek;
+  const restoreSemBreak = location.state?.restoreSemBreak;
+
   const [weekSchedule, setWeekSchedule] = useState<Week>({
     Monday: [],
     Tuesday: [],
@@ -117,7 +129,8 @@ export default function LecturerDashboard() {
             ...sem,
             current_week: computedWeek
           });
-          setSelectedWeek(computedWeek);
+          setSelectedWeek(restoreWeek ?? computedWeek);
+          setIsViewingSemBreak(restoreSemBreak ?? false);
         }
       } catch (err) {
         console.error('Error fetching semester:', err);
@@ -176,8 +189,8 @@ export default function LecturerDashboard() {
         classList.forEach((c: any) => {
           if (c.sessions && c.sessions.length > 0) {
             c.sessions.forEach((session: any) => {
-              const sessionDate = new Date(session.started_date).toISOString().split("T")[0];
-              const key = `${c.class_id}_${sessionDate}`;
+              const localDate = formatLocalYMD(new Date(session.started_date));
+              const key = `${c.class_id}_${localDate}`;
               set.add(key);
             });
           }
@@ -295,22 +308,22 @@ export default function LecturerDashboard() {
   // Helper function to get full date in YYYY-MM-DD format for checking past activations
   const getFullDateForDay = (dayName: string): string => {
     if (!semester) return '';
- 
+
     const dayIndex = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 }[dayName] || 0;
     const semesterStart = new Date(semester.start_date);
- 
-    // Calculate days offset: (selectedWeek - 1) * 7 days + dayIndex
+
     const daysOffset = (selectedWeek - 1) * 7 + dayIndex;
     const targetDate = new Date(semesterStart);
     targetDate.setDate(semesterStart.getDate() + daysOffset);
- 
-    // Format as YYYY-MM-DD
-    const isoString = targetDate.toISOString().split('T');
-    return isoString[0] || '';
+
+    // FIXED: Use local YYYY-MM-DD
+    return targetDate.toLocaleDateString("en-CA"); 
   };
 
-  const handleActivateCheckIn = (classId: number) => {
-    navigate(`/lecturer/class/${classId}`);
+  const handleActivateCheckIn = (classId: number, day: string) => {
+    navigate(`/lecturer/class/${classId}`, {
+      state: { fromWeek: selectedWeek, fromSemBreak: isViewingSemBreak, sessionDate: getFullDateForDay(day) }
+    });
   };
 
   return (
@@ -485,7 +498,7 @@ export default function LecturerDashboard() {
                         </p>
                       </div>
                       <button
-                        onClick={() => handleActivateCheckIn(cls.class_id)}
+                        onClick={() => handleActivateCheckIn(cls.class_id, day)}
                         className={`mt-2 md:mt-0 px-4 py-2 text-white rounded-lg transition ${
                           activeSessions[cls.class_id]
                             ? "bg-green-600 hover:bg-green-500"                            
