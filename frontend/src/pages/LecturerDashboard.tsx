@@ -176,8 +176,7 @@ export default function LecturerDashboard() {
         classList.forEach((c: any) => {
           if (c.sessions && c.sessions.length > 0) {
             c.sessions.forEach((session: any) => {
-              // Extract just the date part (YYYY-MM-DD) from started_at timestamp
-              const sessionDate = session.started_date;   
+              const sessionDate = new Date(session.started_date).toISOString().split("T")[0];
               const key = `${c.class_id}_${sessionDate}`;
               set.add(key);
             });

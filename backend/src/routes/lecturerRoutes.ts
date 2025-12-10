@@ -104,7 +104,9 @@ router.get("/class/:class_id/active-session", async (req: Request, res: Response
     // Find the active (not expired) session for this class (if exists)
     const [activeRows] = await db.query<any[]>(
       `
-      SELECT session_id, class_id, started_at, expires_at, online_mode, is_expired, week_number
+      SELECT session_id, class_id, started_at, 
+        DATE(started_at) AS started_date,
+        expires_at, online_mode, is_expired, week_number
       FROM Session
       WHERE class_id = ?
         AND (is_expired = 0 OR is_expired IS NULL)
@@ -140,9 +142,11 @@ router.get("/class/:class_id/active-session", async (req: Request, res: Response
         session_id: session.session_id,
         class_id: session.class_id,
         started_at: session.started_at,
+        started_date: session.started_date ? session.started_date : (new Date(session.started_at)).toISOString().split('T')[0],
         expires_at: session.expires_at,
         online_mode: !!session.online_mode,
-        is_expired: !!session.is_expired
+        is_expired: !!session.is_expired,
+        week_number: session.week_number ?? null
       },
       checkins: checkinRows
     });
@@ -210,6 +214,8 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
         sessionsWithCheckins.push({
           session_id: s.session_id,
           started_at: s.started_at,
+          started_date: s.started_date ? s.started_date : (new Date(s.started_at)).toISOString().split('T')[0],
+          week_number: s.week_number ?? null,
           expires_at: s.expires_at,
           online_mode: !!s.online_mode,
           is_expired: !!s.is_expired,
@@ -375,17 +381,21 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     io.to(`class_${class_id}`).emit("checkinActivated", {
       class_id: Number(class_id),
       session_id,
-      startedAt,
-      expiresAt,
-      online_mode: isOnlineMode
+      startedAt: startedAt.toISOString(),
+      started_date: semesterStart ? startedAt.toISOString().split('T')[0] : startedAt.toISOString().split('T')[0],
+      expiresAt: expiresAt.toISOString(),
+      online_mode: isOnlineMode,
+      week_number: weekNumber
     });
 
     return res.status(201).json({
       message: "Check-in activated",
       session_id,
       started_at: startedAt,
+      started_date: startedAt.toISOString().split('T')[0],
       expires_at: expiresAt,
-      online_mode: isOnlineMode
+      online_mode: isOnlineMode,
+      week_number: weekNumber
     });
   } catch (err) {
     console.error("Error activating check-in:", err);
