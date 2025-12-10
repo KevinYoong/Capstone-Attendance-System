@@ -32,6 +32,24 @@ interface Semester {
   status: string;
 }
 
+// Compute academic week based on semester start date and today's date
+function getCurrentAcademicWeek(startDateStr: string): number {
+  const startDate = new Date(startDateStr);
+  const today = new Date();
+
+  // Normalize times to midnight
+  startDate.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+
+  // Week 1 = days 0–6 → week = 1 + (days / 7)
+  const week = Math.floor(diffDays / 7) + 1;
+
+  // Clamp range 1–14
+  return Math.max(1, Math.min(14, week));
+}
+
 export default function LecturerDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -93,8 +111,13 @@ export default function LecturerDashboard() {
         setLoadingSemester(true);
         const res = await axios.get<{success: boolean, data: Semester}>('http://localhost:3001/semester/current');
         if (res.data.success) {
-          setSemester(res.data.data);
-          setSelectedWeek(res.data.data.current_week);
+          const sem = res.data.data;
+          const computedWeek = getCurrentAcademicWeek(sem.start_date);
+          setSemester({
+            ...sem,
+            current_week: computedWeek
+          });
+          setSelectedWeek(computedWeek);
         }
       } catch (err) {
         console.error('Error fetching semester:', err);
@@ -153,9 +176,8 @@ export default function LecturerDashboard() {
         classList.forEach((c: any) => {
           if (c.sessions && c.sessions.length > 0) {
             c.sessions.forEach((session: any) => {
-              // Extract just the date part (YYYY-MM-DD) from started_at timestamp
-              const isoString = new Date(session.started_at).toISOString().split('T');
-              const sessionDate = isoString[0] || '';
+              // Backend now returns started_date in YYYY-MM-DD format
+              const sessionDate = session.started_date;
               const key = `${c.class_id}_${sessionDate}`;
               set.add(key);
             });

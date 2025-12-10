@@ -37,11 +37,12 @@ export default function LecturerClassDetail() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
   const now = new Date();
-  const hasPreviousSession = session !== null;
+  const hasPreviousSession =
+    session && new Date(session.started_at) < new Date();
   const isActiveSession =
     session &&
     !session.is_expired &&
-    new Date(session.expires_at) > now;
+    new Date(session.expires_at) > new Date();
 
   const isExpiredSession =
     session &&
@@ -51,7 +52,7 @@ export default function LecturerClassDetail() {
     if (!class_id) return;
     try {
     setLoading(true);
-    const res = await axios.get(`/lecturer/class/${class_id}/details`);
+    const res = await axios.get(`http://localhost:3001/lecturer/class/${class_id}/details`);
 
     // backend shape: { classInfo, students, session, checkins }
     setClassInfo(res.data.classInfo || null);
@@ -146,7 +147,7 @@ export default function LecturerClassDetail() {
   const handleActivateCheckIn = async () => {
     if (!class_id) return;
     try {
-    const res = await axios.post(`/lecturer/class/${class_id}/activate-checkin`, {
+    const res = await axios.post(`http://localhost:3001/lecturer/class/${class_id}/activate-checkin`, {
         online_mode: onlineMode
       });
 
@@ -170,7 +171,7 @@ export default function LecturerClassDetail() {
   const handleManualCheckIn = async (studentId: number) => {
     if (!session) return;
     try {
-      await axios.post(`/lecturer/session/${session.session_id}/manual-checkin`, {
+      await axios.post(`http://localhost:3001/lecturer/session/${session.session_id}/manual-checkin`, {
         student_id: studentId
       });
 
@@ -191,7 +192,7 @@ export default function LecturerClassDetail() {
   if (loading) return <p className="text-white p-8">Loading...</p>;
 
   return (
-    <div className="min-h-screen text-white p-8">
+    <div className="min-h-screen text-white p-8 bg-gradient-to-br from-[#0a0f1f] via-[#0d1b2a] to-[#051923]">
       <button onClick={() => navigate(-1)} className="mb-4 px-4 py-2 bg-gray-600 rounded hover:bg-gray-500">
         ← Back
       </button>
