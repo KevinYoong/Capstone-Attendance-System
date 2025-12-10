@@ -240,6 +240,8 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
 router.get("/class/:class_id/details", async (req: Request, res: Response) => {
   const { class_id } = req.params;
 
+  console.log(`\n📥 GET /class/${class_id}/details`);
+
   try {
     // Get class info
     const [classRows] = await db.query<ClassRow[]>(
@@ -266,6 +268,7 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
     );
 
     const semester = semesterRows[0];
+    console.log(`📅 Semester range: ${semester?.start_date} to ${semester?.end_date}`);
 
     const [sessionRows] = await db.query<SessionRow[]>(
       `SELECT *
@@ -277,6 +280,14 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
       [class_id, semester.start_date, semester.end_date]
     );
 
+    console.log(`📊 Found ${sessionRows.length} session(s) for class ${class_id}`);
+    if (sessionRows.length > 0) {
+      console.log(`   ├─ session_id: ${sessionRows[0].session_id}`);
+      console.log(`   ├─ started_at: ${sessionRows[0].started_at}`);
+      console.log(`   ├─ expires_at: ${sessionRows[0].expires_at}`);
+      console.log(`   └─ is_expired: ${sessionRows[0].is_expired}`);
+    }
+
     const latestSession = sessionRows.length > 0 ? sessionRows[0] : null;
 
     // Get check-ins for this session
@@ -287,6 +298,9 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
         [latestSession.session_id]
       );
       checkins = checkinRows;
+      console.log(`✅ ${checkins.length} check-ins found`);
+    } else {
+      console.log(`⚠️  No session found for this class`);
     }
 
     res.json({
@@ -296,7 +310,7 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
       checkins,
     });
   } catch (err) {
-    console.error(err);
+    console.error("❌ Error in /class/:class_id/details:", err);
     res.status(500).json({ message: "Error retrieving class details" });
   }
 });
@@ -350,7 +364,13 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
     // 3) Create new session
     const startedAt = new Date();
-    const expiresAt = new Date(startedAt.getTime() + 2 * 60000); 
+    const expiresAt = new Date(startedAt.getTime() + 2 * 60000);
+
+    console.log(`\n🟢 Creating new session for class ${class_id}`);
+    console.log(`   ├─ started_at: ${startedAt.toISOString()} (UTC)`);
+    console.log(`   ├─ started_at: ${startedAt.toLocaleString()} (Local)`);
+    console.log(`   └─ expires_at: ${expiresAt.toISOString()}`);
+
     // Load semester start date
     const [semRows] = await db.query<SemesterRow[]>(
       `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`
@@ -367,6 +387,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     );
 
     const session_id = (result as any).insertId;
+    console.log(`✅ Session created with ID: ${session_id}`);
 
     await conn.commit();
     conn.release();
