@@ -202,6 +202,50 @@ export default function LecturerDashboard() {
     }
   }, [user]);
 
+  // Listen for page visibility to refresh when returning to tab
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && user) {
+        console.log('[DEBUG] Page became visible, refetching past activations');
+
+        const fetchPastActivations = async () => {
+          try {
+            const res = await axios.get(
+              `http://localhost:3001/lecturer/${user.id}/attendance/semester`
+            );
+
+            if (!res.data?.success) return;
+
+            const classList = res.data.classes || [];
+            const set = new Set<string>();
+
+            classList.forEach((c: any) => {
+              if (c.sessions && c.sessions.length > 0) {
+                c.sessions.forEach((session: any) => {
+                  const sessionDate = session.started_date;
+                  const key = `${c.class_id}_${sessionDate}`;
+                  set.add(key);
+                });
+              }
+            });
+
+            console.log('[DEBUG] Past activated sessions refreshed:', Array.from(set));
+            setPastActivatedSessions(set);
+          } catch (err) {
+            console.error("Error fetching past activations:", err);
+          }
+        };
+
+        fetchPastActivations();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [user]);
+
   // Refetch schedule when selectedWeek changes
   useEffect(() => {
     if (!user || !semester) return;

@@ -52,7 +52,15 @@ export default function LecturerClassDetail() {
     if (!class_id) return;
     try {
     setLoading(true);
+    console.log(`📥 Fetching details for class ${class_id}...`);
     const res = await axios.get(`http://localhost:3001/lecturer/class/${class_id}/details`);
+
+    console.log("📦 Details response:", {
+      hasSession: !!res.data.session,
+      session: res.data.session,
+      checkinsCount: res.data.checkins?.length || 0,
+      studentsCount: res.data.students?.length || 0
+    });
 
     // backend shape: { classInfo, students, session, checkins }
     setClassInfo(res.data.classInfo || null);
@@ -90,7 +98,7 @@ export default function LecturerClassDetail() {
         }))
       );
     } catch (err) {
-    console.error("Error fetching class details:", err);
+    console.error("❌ Error fetching class details:", err);
     } finally {
     setLoading(false);
     }
@@ -134,12 +142,31 @@ export default function LecturerClassDetail() {
       setStudents((prev) => prev.map((s) => (s.student_id === data.student_id ? { ...s, status: "checked-in" } : s)));
     };
 
+    const onCheckinActivated = async (data: any) => {
+      if (data.class_id !== id) return;
+      console.log("🟢 checkinActivated event received:", data);
+
+      // Update session state immediately from socket data
+      setSession({
+        session_id: data.session_id,
+        started_at: data.startedAt,
+        expires_at: data.expiresAt,
+        online_mode: !!data.online_mode,
+        is_expired: false,
+      });
+
+      // Refresh full details from backend
+      await fetchDetails();
+    };
+
     socket.on("sessionExpired", onSessionExpired);
     socket.on("studentCheckedIn", onStudentCheckedIn);
+    socket.on("checkinActivated", onCheckinActivated);
 
     return () => {
       socket.off("sessionExpired", onSessionExpired);
       socket.off("studentCheckedIn", onStudentCheckedIn);
+      socket.off("checkinActivated", onCheckinActivated);
       socket.emit("leaveLecturerRoom", id);
     };
   }, [class_id, fetchDetails]);
@@ -147,22 +174,36 @@ export default function LecturerClassDetail() {
   const handleActivateCheckIn = async () => {
     if (!class_id) return;
     try {
+    console.log("🟢 Activating check-in for class:", class_id);
     const res = await axios.post(`http://localhost:3001/lecturer/class/${class_id}/activate-checkin`, {
         online_mode: onlineMode
       });
 
+    console.log("✅ Activation response:", res.data);
+
+    // Update session immediately with response data
     setSession({
       session_id: Number(res.data.session_id),
       started_at: res.data.started_at,
       expires_at: res.data.expires_at,
       online_mode: !!res.data.online_mode,
-      is_expired: !!res.data.is_expired,
+      is_expired: false,
     });
 
-    // Immediately refresh to ensure checkins and students reflect latest state
+    // Reset all students to pending (they haven't checked in yet for this NEW session)
+    setStudents((prev) =>
+      prev.map((s) => ({
+        ...s,
+        status: "pending" as const
+      }))
+    );
+
+    console.log("🔄 Fetching updated details...");
+    // Refresh to ensure we have latest data
     await fetchDetails();
+    console.log("✅ Details refreshed");
     } catch (err) {
-    console.error("Error activating check-in:", err);
+    console.error("❌ Error activating check-in:", err);
     }
   };
 
