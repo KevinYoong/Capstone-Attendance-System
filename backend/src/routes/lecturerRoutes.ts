@@ -66,8 +66,6 @@ router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => 
   }
 
   try {
-    // Note: week parameter accepted but not used for filtering since all classes are standard (1-14)
-    // Can be used in future for classes with specific start_week/end_week
     const [rows] = await db.query<ClassRow[]>(
       `
       SELECT * FROM Class
@@ -100,7 +98,6 @@ router.get("/class/:class_id/active-session", async (req: Request, res: Response
   const { class_id } = req.params;
 
   try {
-    // Find the active (not expired) session for this class (if exists)
     const [activeRows] = await db.query<any[]>(
       `
       SELECT session_id, class_id, started_at, 
@@ -122,7 +119,6 @@ router.get("/class/:class_id/active-session", async (req: Request, res: Response
 
     const session = activeRows[0];
 
-    // Fetch checkins for this session with student info
     const [checkinRows] = await db.query<any[]>(
       `
       SELECT ci.checkin_id, ci.session_id, ci.student_id, ci.checkin_time, ci.status,
@@ -160,7 +156,6 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
   const { lecturer_id } = req.params;
 
   try {
-    // 1) Get active semester
     const [semRows] = await db.query<any[]>(
       `SELECT * FROM Semester WHERE status = 'active' LIMIT 1`
     );
@@ -170,7 +165,6 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
     }
     const semester = semRows[0];
 
-    // 2) Get classes for this lecturer (that fall within semester is not necessary here because classes are tied to semester in schema)
     const [classRows] = await db.query<any[]>(
       `
       SELECT class_id, class_name, course_code
@@ -181,7 +175,6 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
       [lecturer_id]
     );
 
-    // 3) For each class, fetch sessions in semester range and their checkins
     const classesWithSessions: any[] = [];
 
     for (const c of classRows) {
@@ -196,7 +189,6 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
         [c.class_id, semester.start_date, semester.end_date]
       );
 
-      // For each session, gather checkins
       const sessionsWithCheckins = [];
       for (const s of sessions) {
         const [checkins] = await db.query<any[]>(
@@ -249,9 +241,7 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
 
   try {
     const [classRows] = await db.query<ClassRow[]>(
-      `SELECT 
-        c.*, 
-        l.name AS lecturer_name
+      `SELECT c.*, l.name AS lecturer_name
       FROM Class c
       JOIN Lecturer l ON c.lecturer_id = l.lecturer_id
       WHERE c.class_id = ?`,
@@ -270,7 +260,6 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
       [class_id]
     );
 
-    // If frontend gives us a date → fetch session for EXACT date
     let session: SessionRow | null = null;
     let checkins: CheckinRow[] = [];
 
@@ -296,7 +285,6 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
         checkins = checkinRows;
       }
     } else {
-      // Fallback: get latest session in semester if no date provided
       const [semesterRows] = await db.query<any[]>(
         `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
       );
@@ -346,17 +334,14 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     conn = await (db as any).getConnection();
     await conn.beginTransaction();
 
-    // 1) Optional: mark any already expired sessions as is_expired = 1 (safety)
     await conn.query(
       `UPDATE Session SET is_expired = 1 WHERE class_id = ? AND expires_at < NOW() AND is_expired = 0`,
       [class_id]
     );
 
-    // 2) Check if there is an active session that hasn't expired (avoid duplicates)
     const [semesterRows] = await conn.query(
       `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
     );
-
     const semester = semesterRows[0];
 
     const [activeRows] = await conn.query(
@@ -371,7 +356,6 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     );
 
     if (activeRows.length > 0) {
-      // There's an active session — return it instead of creating a new one
       const active = activeRows[0];
       await conn.rollback();
       conn.release();
@@ -384,42 +368,30 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
       });
     }
 
-    // 3) Create new session
     const startedAt = new Date();
-    console.log("🔥 SERVER TIME CHECK");
-    console.log("new Date() =", startedAt);
-    console.log("toISOString() =", startedAt.toISOString());
     const expiresAt = new Date(startedAt.getTime() + 30 * 1000); 
-    // Load semester start date
+
     const [semRows] = await db.query<SemesterRow[]>(
       `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`
     );
     const semesterStart = new Date(semRows[0].start_date);
     const weekNumber = getAcademicWeek(semesterStart, startedAt);
+    
     const [classRows] = await conn.query(
-      `SELECT day_of_week, start_time 
-      FROM Class 
-      WHERE class_id = ?`,
+      `SELECT day_of_week, start_time FROM Class WHERE class_id = ?`,
       [class_id]
     );
-
     const cls = classRows[0];
 
     const dayIndexMap = {
-      Monday: 0,
-      Tuesday: 1,
-      Wednesday: 2,
-      Thursday: 3,
-      Friday: 4,
+      Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4,
     } as const;
-
     const dayIndex = dayIndexMap[cls.day_of_week as keyof typeof dayIndexMap];
 
-    // Compute scheduled date based on semesterStart + week number + class day
     const scheduled = new Date(semesterStart);
     scheduled.setDate(semesterStart.getDate() + (weekNumber - 1) * 7 + dayIndex);
-
     const scheduled_date = scheduled.toISOString().split("T")[0];
+
     const { online_mode } = req.body;
     const isOnlineMode: boolean = online_mode === true;
 
@@ -434,7 +406,6 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     await conn.commit();
     conn.release();
 
-    // Emit to this class room only
     io.to(`class_${class_id}`).emit("checkinActivated", {
       class_id: Number(class_id),
       session_id,
@@ -475,7 +446,6 @@ router.post("/session/:session_id/manual-checkin", async (req: Request, res: Res
   }
 
   try {
-    // 1) Validate session exists
     const [sessionRows] = await db.query<any[]>(
       `SELECT session_id, class_id, expires_at, online_mode, is_expired, week_number
        FROM Session 
@@ -486,20 +456,15 @@ router.post("/session/:session_id/manual-checkin", async (req: Request, res: Res
     if (sessionRows.length === 0) {
       return res.status(404).json({ success: false, message: "Session not found" });
     }
-
     const session = sessionRows[0];
 
-    // 2) Check if session is expired
     const now = new Date();
     if (session.is_expired === 1 || new Date(session.expires_at) < now) {
       return res.status(400).json({ success: false, message: "Session already expired" });
     }
 
-    // 3) Prevent duplicate check-ins
     const [existing] = await db.query<any[]>(
-      `SELECT checkin_id 
-       FROM Checkin 
-       WHERE session_id = ? AND student_id = ?`,
+      `SELECT checkin_id FROM Checkin WHERE session_id = ? AND student_id = ?`,
       [session_id, student_id]
     );
 
@@ -511,14 +476,12 @@ router.post("/session/:session_id/manual-checkin", async (req: Request, res: Res
       });
     }
 
-    // 4) Insert manual check-in
     await db.query(
       `INSERT INTO Checkin (session_id, student_id, checkin_time, status)
        VALUES (?, ?, NOW(), 'checked-in')`,
       [session_id, student_id]
     );
 
-    // 5) Emit to lecturer & students watching the class
     io.to(`class_${session.class_id}`).emit("studentCheckedIn", {
       class_id: session.class_id,
       student_id,
@@ -539,12 +502,13 @@ router.post("/session/:session_id/manual-checkin", async (req: Request, res: Res
   }
 });
 
-// Lecturer analytics endpoint (Semester overview)
+// ============================================================================
+// Lecturer analytics endpoint (Semester overview) - UPDATED DYNAMIC COUNT
+// ============================================================================
 router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
   const { lecturer_id } = req.params;
 
   try {
-    // Get active semester
     const [semRows] = await db.query<any[]>(
       `SELECT * FROM Semester WHERE status='active' LIMIT 1`
     );
@@ -553,7 +517,6 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
 
     const semester = semRows[0];
 
-    // Fetch all classes under this lecturer
     const [classRows] = await db.query<any[]>(
       `SELECT class_id, class_name, course_code
        FROM Class
@@ -565,33 +528,37 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
     const results: any[] = [];
 
     for (const cls of classRows) {
+      // 1) Dynamic Total: Count sessions in DB for this class/semester
+      const [countRows] = await db.query<any[]>(
+        `SELECT COUNT(*) AS total 
+         FROM Session 
+         WHERE class_id = ? 
+           AND started_at BETWEEN ? AND ?`,
+        [cls.class_id, semester.start_date, semester.end_date]
+      );
+      const totalSessions = countRows[0].total || 0;
 
-      // 1) Get all sessions actually held this semester
+      // 2) Get Past/Active sessions to calculate Actual Present vs Missed
       const [sessions] = await db.query<any[]>(
         `SELECT session_id
          FROM Session
          WHERE class_id = ?
            AND started_at BETWEEN ? AND ?
+           AND started_at <= NOW()
          ORDER BY started_at ASC`,
         [cls.class_id, semester.start_date, semester.end_date]
       );
 
-      const totalSessions = sessions.length;
-
       let presentCount = 0;
       let missedCount = 0;
 
-      // 2) For each session, count present and missed students
       for (const sess of sessions) {
-
-        // Count present
         const [presentRows] = await db.query<any[]>(
           `SELECT COUNT(*) AS count FROM Checkin WHERE session_id = ?`,
           [sess.session_id]
         );
         const present = presentRows[0].count;
 
-        // Count enrolled students
         const [totalRows] = await db.query<any[]>(
           `SELECT COUNT(*) AS count FROM StudentClass WHERE class_id = ?`,
           [cls.class_id]
@@ -604,11 +571,12 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
         missedCount += missed;
       }
 
-      // 3) Actual attendance rate based ONLY on actual sessions
+      // 3) Attendance Rate
+      const safeTotal = (presentCount + missedCount) === 0 ? 1 : (presentCount + missedCount);
       const attendanceRate =
         (presentCount + missedCount) === 0
-          ? 0
-          : Math.round((presentCount / (presentCount + missedCount)) * 100);
+          ? 0 // or 100 depending on preference for empty classes
+          : Math.round((presentCount / safeTotal) * 100);
 
       let status: "good" | "warning" | "critical";
       if (attendanceRate >= 90) status = "good";
@@ -619,10 +587,9 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
         class_id: cls.class_id,
         class_name: cls.class_name,
         course_code: cls.course_code,
-
-        total_sessions: totalSessions,  // 👈 ACTUAL sessions
-        present_count: presentCount,    // 👈 ACTUAL present
-        missed_count: missedCount,      // 👈 ACTUAL missed
+        total_sessions: totalSessions, // Dynamic Total
+        present_count: presentCount,
+        missed_count: missedCount,
         attendance_rate: attendanceRate,
         attendance_status: status,
       });
@@ -640,12 +607,13 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
   }
 });
 
-// Lecturer analytics endpoint (Per-class detailed)
+// ============================================================================
+// Lecturer analytics endpoint (Per-class detailed) - UPDATED DYNAMIC COUNT
+// ============================================================================
 router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: Response) => {
   const { class_id } = req.params;
 
   try {
-    // 1. Get active semester
     const [semRows] = await db.query<any[]>(
       `SELECT * FROM Semester WHERE status='active' LIMIT 1`
     );
@@ -654,7 +622,7 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
 
     const semester = semRows[0];
 
-    // 2. Get all students enrolled in this class
+    // Get Students
     const [studentRows] = await db.query<any[]>(
       `
       SELECT s.student_id, s.name, s.email
@@ -666,7 +634,7 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
       [class_id]
     );
 
-    // 3. Get all sessions
+    // Get Sessions
     const [sessions] = await db.query<any[]>(
       `
       SELECT session_id, started_at, expires_at, online_mode, is_expired
@@ -677,6 +645,9 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
       `,
       [class_id, semester.start_date, semester.end_date]
     );
+
+    // DYNAMIC TOTAL: derived from session length
+    const totalSessions = sessions.length;
 
     const sessionDetails: any[] = [];
     const studentMap: Record<number, any> = {};
@@ -691,7 +662,6 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
       };
     });
 
-    // Count per session + update student totals
     for (const sess of sessions) {
       const [presentRows] = await db.query<any[]>(
         `SELECT student_id FROM Checkin WHERE session_id = ?`,
@@ -700,10 +670,9 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
 
       const presentList = presentRows.map((r) => r.student_id);
       const presentCount = presentList.length;
-      const total = studentRows.length;
-      const missedCount = total - presentCount;
+      const totalStudents = studentRows.length;
+      const missedCount = totalStudents - presentCount;
 
-      // Update student aggregates
       studentRows.forEach((st) => {
         if (presentList.includes(st.student_id)) {
           studentMap[st.student_id].present_count++;
@@ -717,17 +686,20 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
         date: sess.started_at,
         present_count: presentCount,
         missed_count: missedCount,
-        attendance_rate: total === 0 ? 0 : Math.round((presentCount / total) * 100),
+        attendance_rate: totalStudents === 0 ? 0 : Math.round((presentCount / totalStudents) * 100),
         online_mode: !!sess.online_mode
       });
     }
 
-    // Build student list with rates
+    // Build Student List with Dynamic Rate Logic
     const studentList = Object.values(studentMap).map((s: any) => {
-      const FINAL_TOTAL = 14;
-      const missedFinal = s.missed_count;
-      const presentFinal = FINAL_TOTAL - missedFinal;
-      const rate = Math.round((presentFinal / FINAL_TOTAL) * 100);
+      // Logic: Score = Total Sessions - Missed Sessions
+      const safeTotal = totalSessions === 0 ? 1 : totalSessions;
+      const attendanceRemaining = Math.max(0, totalSessions - s.missed_count);
+      
+      const rate = totalSessions === 0 
+        ? 100 
+        : Math.round((attendanceRemaining / safeTotal) * 100);
 
       let status: "good" | "warning" | "critical";
       if (rate >= 90) status = "good";
@@ -737,7 +709,6 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
       return { ...s, attendance_rate: rate, attendance_status: status };
     });
 
-    // Sort least-attending students
     const leastAttending = [...studentList].sort(
       (a, b) => a.attendance_rate - b.attendance_rate
     );
@@ -745,7 +716,7 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
     return res.json({
       success: true,
       summary: {
-        total_sessions: sessions.length,
+        total_sessions: totalSessions, // Dynamic
         present_total: studentList.reduce((a, s) => a + s.present_count, 0),
         missed_total: studentList.reduce((a, s) => a + s.missed_count, 0),
       },
@@ -760,13 +731,12 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
   }
 });
 
-// Export class analytics as CSV
+// Export CSV (also updated)
 router.get("/:lecturer_id/analytics/class/:class_id/export.csv", async (req: Request, res: Response) => {
   const { class_id } = req.params;
   const type = (req.query.type as string) || "students";
 
   try {
-    // (Reuse analytics logic here)
     const [studentRows] = await db.query<any[]>(
       `SELECT s.student_id, s.name, s.email
        FROM StudentClass sc
@@ -784,8 +754,9 @@ router.get("/:lecturer_id/analytics/class/:class_id/export.csv", async (req: Req
       [class_id]
     );
 
+    const totalSessions = sessions.length;
+
     if (type === "students") {
-      // Build student summary CSV
       let csv = "student_id,name,email,present_count,missed_count,attendance_rate,status\n";
 
       for (const st of studentRows) {
@@ -799,11 +770,10 @@ router.get("/:lecturer_id/analytics/class/:class_id/export.csv", async (req: Req
         );
 
         const present = presentRows[0].count;
+        const missed = totalSessions - present;
         
-        const FINAL_TOTAL = 14;
-        const missed = FINAL_TOTAL - present;
-        const rate = Math.round((present / FINAL_TOTAL) * 100);
-
+        const safeTotal = totalSessions === 0 ? 1 : totalSessions;
+        const rate = Math.round((present / safeTotal) * 100);
         const status = rate >= 90 ? "good" : rate >= 80 ? "warning" : "critical";
 
         csv += `${st.student_id},${st.name},${st.email},${present},${missed},${rate},${status}\n`;
@@ -813,20 +783,16 @@ router.get("/:lecturer_id/analytics/class/:class_id/export.csv", async (req: Req
       return res.send(csv);
     }
 
-    // type = sessions
     let csv = "session_id,date,present_count,missed_count,attendance_rate\n";
-
     for (const sess of sessions) {
       const [presentRows] = await db.query<any[]>(
         `SELECT COUNT(*) AS count FROM Checkin WHERE session_id = ?`,
         [sess.session_id]
       );
-
       const present = presentRows[0].count;
       const total = studentRows.length;
       const missed = total - present;
       const rate = total === 0 ? 0 : Math.round((present / total) * 100);
-
       csv += `${sess.session_id},${sess.started_at},${present},${missed},${rate}\n`;
     }
 
