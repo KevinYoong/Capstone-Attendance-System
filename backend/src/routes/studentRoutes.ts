@@ -199,7 +199,7 @@ router.get("/:student_id/active-sessions", async (req: Request, res: Response) =
     // Return sessions for student's classes where session is not expired
     const [rows] = await db.query<any[]>(
       `
-      SELECT s.session_id, s.class_id, s.started_at, s.expires_at, s.online_mode
+      SELECT s.session_id, s.class_id, s.started_at, s.scheduled_date, s.expires_at, s.online_mode
       FROM Session s
       JOIN StudentClass sc ON sc.class_id = s.class_id
       WHERE sc.student_id = ?
@@ -215,6 +215,7 @@ router.get("/:student_id/active-sessions", async (req: Request, res: Response) =
       session_id: r.session_id,
       class_id: r.class_id,
       started_at: r.started_at,
+      scheduled_date: r.scheduled_date,
       expires_at: r.expires_at,
       online_mode: !!r.online_mode,
     }));
