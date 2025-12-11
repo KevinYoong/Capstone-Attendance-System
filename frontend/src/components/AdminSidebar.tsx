@@ -5,9 +5,11 @@ import {
   GraduationCap,
   Layers,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  LogOut
 } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 interface SidebarItemProps {
   icon: React.ReactNode;
@@ -33,10 +35,17 @@ function SidebarItem({ icon, label, to, collapsed }: SidebarItemProps) {
 
 export default function AdminSidebar() {
   const [collapsed, setCollapsed] = useState(false);
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    logout();
+    navigate("/");
+  };
 
   return (
     <div
-      className={`h-screen bg-[#0d1b2a] border-r border-white/10 transition-all duration-300
+      className={`h-screen bg-[#0d1b2a] border-r border-white/10 transition-all duration-300 flex flex-col
         ${collapsed ? "w-20" : "w-64"}
       `}
     >
@@ -59,7 +68,7 @@ export default function AdminSidebar() {
       </div>
 
       {/* Menu Items */}
-      <nav className="flex flex-col gap-1 mt-6 px-2">
+      <nav className="flex flex-col gap-1 mt-6 px-2 flex-1">
         <SidebarItem
           icon={<CalendarDays />}
           label="Semesters"
@@ -85,6 +94,25 @@ export default function AdminSidebar() {
           collapsed={collapsed}
         />
       </nav>
+
+      {/* Footer / Logout Section */}
+      <div className="p-2 border-t border-white/10 mb-2 mx-2">
+        <button
+          onClick={handleLogout}
+          // REMOVED: ${collapsed ? "justify-center" : ""} 
+          // Now it aligns exactly like SidebarItem (flex default is left)
+          className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors
+            text-red-400 hover:bg-red-500/10 hover:text-red-300`}
+          title="Logout"
+        >
+          <div className="text-xl">
+            <LogOut />
+          </div>
+          
+          {/* Using a simple condition here matches your SidebarItem logic */}
+          {!collapsed && <span className="text-sm font-medium">Logout</span>}
+        </button>
+      </div>
     </div>
   );
 }
