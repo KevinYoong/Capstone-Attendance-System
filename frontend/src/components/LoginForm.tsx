@@ -30,7 +30,7 @@ export default function LoginForm() {
       // Navigate based on role
       if (response.user.role === "student") navigate("/student");
       else if (response.user.role === "lecturer") navigate("/lecturer");
-      else if (response.user.role === "admin") navigate("/admin");
+      else if (response.user.role === "admin") navigate("/admin/semesters");
     } catch (err: any) {
       setError(err.response?.data?.message || "Invalid login credentials");
     } finally {

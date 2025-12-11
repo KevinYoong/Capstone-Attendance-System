@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  LayoutDashboard,
   CalendarDays,
   Users,
   GraduationCap,
@@ -61,12 +60,6 @@ export default function AdminSidebar() {
 
       {/* Menu Items */}
       <nav className="flex flex-col gap-1 mt-6 px-2">
-        <SidebarItem
-          icon={<LayoutDashboard />}
-          label="Dashboard"
-          to="/admin"
-          collapsed={collapsed}
-        />
         <SidebarItem
           icon={<CalendarDays />}
           label="Semesters"

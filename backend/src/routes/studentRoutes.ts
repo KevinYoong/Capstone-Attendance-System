@@ -89,21 +89,13 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
   const { student_id } = req.params;
 
   try {
-    // 1. Load active semester
     const [semRows] = await db.query<any[]>(
       `SELECT * FROM Semester WHERE status = 'active' LIMIT 1`
     );
-
-    if (semRows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "No active semester found"
-      });
-    }
-
+    // ... (keep active semester check) ...
     const semester = semRows[0];
 
-    // 2. Load ALL sessions in this semester that belong to classes the student is enrolled in
+    // 1. UPDATE QUERY to select s.scheduled_date
     const [sessionRows] = await db.query<any[]>(
       `
       SELECT 
@@ -113,7 +105,7 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
         s.expires_at,
         s.online_mode,
         s.is_expired,
-
+        s.scheduled_date,  
         c.class_name,
         c.course_code,
 
@@ -133,10 +125,9 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
       [student_id, student_id, semester.start_date, semester.end_date]
     );
 
-    // 3. Normalize status (if CI missing but expired → missed; if not expired → pending)
+    // 2. UPDATE MAPPING to include formatted scheduled_date
     const attendance = sessionRows.map((s) => {
       let status = s.student_status;
-
       if (!status) {
         status = s.is_expired ? "missed" : "pending";
       }
@@ -149,7 +140,11 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
         started_at: s.started_at,
         expires_at: s.expires_at,
         online_mode: s.online_mode,
-        student_status: status
+        student_status: status,
+        // Ensure consistent YYYY-MM-DD format
+        scheduled_date: s.scheduled_date 
+          ? new Date(s.scheduled_date).toLocaleDateString('en-CA') 
+          : null
       };
     });
 

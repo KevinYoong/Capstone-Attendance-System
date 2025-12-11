@@ -1,8 +1,7 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import LoginPage from "./pages/LoginPage";
 import StudentDashboard from "./pages/StudentDashboard";
 import LecturerDashboard from "./pages/LecturerDashboard";
-import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminLayout from "./layouts/AdminLayout";
 import AdminStudents from "./pages/admin/AdminStudents";
 import AdminLecturers from "./pages/admin/AdminLecturers";
@@ -93,7 +92,7 @@ export default function App() {
               </ProtectedRoute>
             }
           >
-            <Route index element={<AdminDashboard />} />
+            <Route index element={<Navigate to="semesters" replace />} />
             <Route path="semesters" element={<AdminSemesters />} />
             <Route path="students" element={<AdminStudents />} />
             <Route path="lecturers" element={<AdminLecturers />} />

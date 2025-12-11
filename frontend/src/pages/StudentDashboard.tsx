@@ -380,13 +380,20 @@ export default function StudentDashboard() {
           });
 
           if (response.data.success) {
-            // Update local state to reflect check-in immediately
-             setAttendanceSessions(prev => prev.map(sess => {
-                 if (sess.session_id === session.session_id) {
-                     return { ...sess, student_status: 'present' };
+             setAttendanceSessions(prev => {
+                 const exists = prev.find(s => s.session_id === session.session_id);
+                 if (exists) {
+                     return prev.map(s => s.session_id === session.session_id ? { ...s, student_status: 'present' } : s);
                  }
-                 return sess;
-             }));
+                 
+                 return [...prev, {
+                     session_id: session.session_id,
+                     class_id: classId,
+                     started_at: session.startedAt, 
+                     student_status: 'present',
+                     scheduled_date: session.scheduled_date // <--- Pass this from activeSessions!
+                 }];
+             });
             alert("✅ Check-in successful!");
           }
         } catch (error: any) {
@@ -518,14 +525,23 @@ export default function StudentDashboard() {
                     // 🔍 FIXED LOGIC: Strict Date Matching + No Global Sets
                     // ------------------------------------------------------------------
                     
+                    // 1. Calculate the Target Date (YYYY-MM-DD)
                     const rowDateObj = getDateObjForDay(day);
-                    const rowDateString = rowDateObj ? rowDateObj.toDateString() : "";
+                    // Use 'en-CA' to get YYYY-MM-DD format which matches your backend
+                    const rowIsoDate = rowDateObj ? rowDateObj.toLocaleDateString('en-CA') : "";
 
-                    // Find specific session for THIS DATE
+                    // 2. Find session by Matching SCHEDULED DATE (Reliable) instead of started_at
                     const sessionForThisWeek = attendanceSessions.find((s) => {
                         if (s.class_id !== cls.class_id) return false;
-                        const sDate = new Date(s.started_at).toDateString();
-                        return sDate === rowDateString;
+                        
+                        // PRIMARY MATCH: Use the robust scheduled_date from DB/State
+                        if (s.scheduled_date) {
+                            return s.scheduled_date === rowIsoDate;
+                        }
+                        
+                        // FALLBACK: If scheduled_date is missing (old data), try calculating from started_at
+                        const sDate = new Date(s.started_at).toLocaleDateString('en-CA');
+                        return sDate === rowIsoDate;
                     });
 
                     // Determine Status based ONLY on this specific session entry
