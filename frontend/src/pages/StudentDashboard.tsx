@@ -267,16 +267,14 @@ export default function StudentDashboard() {
       }));
     });
 
-    socket.on("studentCheckedIn", async (data: any) => {
+    socket.on("studentCheckedIn", (data: any) => {
       console.log("Student checked in:", data);
       if (data.student_id === user?.id) {
         setCheckedInClasses((prev) => new Set(prev).add(data.class_id));
-        // Refresh attendance data to get latest status from backend
-        await fetchAttendanceSemester();
       }
     });
 
-    socket.on("sessionExpired", async (data: any) => {
+    socket.on("sessionExpired", (data: any) => {
       console.log("🔴 Session expired:", data);
 
       // If student didn't check in, mark missed
@@ -294,9 +292,6 @@ export default function StudentDashboard() {
         delete copy[data.class_id];
         return copy;
       });
-
-      // Refresh attendance data to persist status after page refresh
-      await fetchAttendanceSemester();
     });
 
     return () => {
@@ -657,8 +652,7 @@ export default function StudentDashboard() {
                   const targetDate = new Date(weekStartDate);
                   targetDate.setDate(weekStartDate.getDate() + classDayIndex);
 
-                  // Use local date formatting (not UTC) to match backend's scheduled_date
-                  const targetDateStr = targetDate.toLocaleDateString("en-CA");
+                  const targetDateStr = targetDate.toISOString().split("T")[0];
                   const activeDateStr = active.scheduled_date;
 
                   console.log("---- DATE MATCH CHECK ----");
