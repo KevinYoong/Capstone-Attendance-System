@@ -53,7 +53,6 @@ function getAcademicWeek(startDate: Date, targetDate: Date): number {
 // Get weekly schedule for a lecturer
 router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => {
   const { lecturer_id } = req.params;
-  const { week } = req.query; // Accept week parameter (optional for now)
   const selectedWeek = req.query.week;
 
   if (selectedWeek === "break") {
@@ -104,7 +103,9 @@ router.get("/class/:class_id/active-session", async (req: Request, res: Response
     // Find the active (not expired) session for this class (if exists)
     const [activeRows] = await db.query<any[]>(
       `
-      SELECT session_id, class_id, started_at, expires_at, online_mode, is_expired, week_number
+      SELECT session_id, class_id, started_at, 
+        DATE(started_at) AS started_date,
+        expires_at, online_mode, is_expired, week_number
       FROM Session
       WHERE class_id = ?
         AND (is_expired = 0 OR is_expired IS NULL)
@@ -140,9 +141,12 @@ router.get("/class/:class_id/active-session", async (req: Request, res: Response
         session_id: session.session_id,
         class_id: session.class_id,
         started_at: session.started_at,
+        started_date: session.started_date ? session.started_date : (new Date(session.started_at)).toISOString().split('T')[0],
+        scheduled_date: session.scheduled_date,
         expires_at: session.expires_at,
         online_mode: !!session.online_mode,
-        is_expired: !!session.is_expired
+        is_expired: !!session.is_expired,
+        week_number: session.week_number ?? null
       },
       checkins: checkinRows
     });
@@ -210,6 +214,8 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
         sessionsWithCheckins.push({
           session_id: s.session_id,
           started_at: s.started_at,
+          started_date: s.started_date ? s.started_date : (new Date(s.started_at)).toISOString().split('T')[0],
+          week_number: s.week_number ?? null,
           expires_at: s.expires_at,
           online_mode: !!s.online_mode,
           is_expired: !!s.is_expired,
@@ -239,19 +245,21 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
 // Get detailed class info
 router.get("/class/:class_id/details", async (req: Request, res: Response) => {
   const { class_id } = req.params;
-
-  console.log(`\n📥 GET /class/${class_id}/details`);
+  const selectedDate = req.query.date as string | undefined;
 
   try {
-    // Get class info
     const [classRows] = await db.query<ClassRow[]>(
-      `SELECT * FROM Class WHERE class_id = ?`,
+      `SELECT 
+        c.*, 
+        l.name AS lecturer_name
+      FROM Class c
+      JOIN Lecturer l ON c.lecturer_id = l.lecturer_id
+      WHERE c.class_id = ?`,
       [class_id]
     );
     const classInfo = classRows[0];
     if (!classInfo) return res.status(404).json({ message: "Class not found" });
 
-    // Get enrolled students
     const [studentRows] = await db.query<StudentRow[]>(
       `
       SELECT Student.student_id, Student.name, Student.email
@@ -262,56 +270,70 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
       [class_id]
     );
 
-    // Get latest session (if any)
-    const [semesterRows] = await db.query<any[]>(
-      `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
-    );
-
-    const semester = semesterRows[0];
-    console.log(`📅 Semester range: ${semester?.start_date} to ${semester?.end_date}`);
-
-    const [sessionRows] = await db.query<SessionRow[]>(
-      `SELECT *
-      FROM Session
-      WHERE class_id = ?
-        AND started_at BETWEEN ? AND ?
-      ORDER BY started_at DESC
-      LIMIT 1`,
-      [class_id, semester.start_date, semester.end_date]
-    );
-
-    console.log(`📊 Found ${sessionRows.length} session(s) for class ${class_id}`);
-    if (sessionRows.length > 0) {
-      console.log(`   ├─ session_id: ${sessionRows[0].session_id}`);
-      console.log(`   ├─ started_at: ${sessionRows[0].started_at}`);
-      console.log(`   ├─ expires_at: ${sessionRows[0].expires_at}`);
-      console.log(`   └─ is_expired: ${sessionRows[0].is_expired}`);
-    }
-
-    const latestSession = sessionRows.length > 0 ? sessionRows[0] : null;
-
-    // Get check-ins for this session
+    // If frontend gives us a date → fetch session for EXACT date
+    let session: SessionRow | null = null;
     let checkins: CheckinRow[] = [];
-    if (latestSession) {
-      const [checkinRows] = await db.query<CheckinRow[]>(
-        `SELECT * FROM Checkin WHERE session_id = ?`,
-        [latestSession.session_id]
+
+    if (selectedDate) {
+      const [sessionRows] = await db.query<SessionRow[]>(
+        `
+        SELECT *
+        FROM Session
+        WHERE class_id = ?
+          AND DATE(started_at) = ?
+        LIMIT 1
+        `,
+        [class_id, selectedDate]
       );
-      checkins = checkinRows;
-      console.log(`✅ ${checkins.length} check-ins found`);
+
+      session = sessionRows.length > 0 ? sessionRows[0] : null;
+
+      if (session) {
+        const [checkinRows] = await db.query<CheckinRow[]>(
+          `SELECT * FROM Checkin WHERE session_id = ?`,
+          [session.session_id]
+        );
+        checkins = checkinRows;
+      }
     } else {
-      console.log(`⚠️  No session found for this class`);
+      // Fallback: get latest session in semester if no date provided
+      const [semesterRows] = await db.query<any[]>(
+        `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
+      );
+      const semester = semesterRows[0];
+
+      const [sessionRows] = await db.query<SessionRow[]>(
+        `
+        SELECT *
+        FROM Session
+        WHERE class_id = ?
+          AND started_at BETWEEN ? AND ?
+        ORDER BY started_at DESC
+        LIMIT 1
+        `,
+        [class_id, semester.start_date, semester.end_date]
+      );
+
+      session = sessionRows.length > 0 ? sessionRows[0] : null;
+
+      if (session) {
+        const [checkinRows] = await db.query<CheckinRow[]>(
+          `SELECT * FROM Checkin WHERE session_id = ?`,
+          [session.session_id]
+        );
+        checkins = checkinRows;
+      }
     }
 
-    res.json({
+    return res.json({
       classInfo,
       students: studentRows,
-      session: latestSession,
-      checkins,
+      session,
+      checkins
     });
   } catch (err) {
-    console.error("❌ Error in /class/:class_id/details:", err);
-    res.status(500).json({ message: "Error retrieving class details" });
+    console.error("Error retrieving class details:", err);
+    return res.status(500).json({ message: "Error retrieving class details" });
   }
 });
 
@@ -364,30 +386,50 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
     // 3) Create new session
     const startedAt = new Date();
-    const expiresAt = new Date(startedAt.getTime() + 2 * 60000);
-
-    console.log(`\n🟢 Creating new session for class ${class_id}`);
-    console.log(`   ├─ started_at: ${startedAt.toISOString()} (UTC)`);
-    console.log(`   ├─ started_at: ${startedAt.toLocaleString()} (Local)`);
-    console.log(`   └─ expires_at: ${expiresAt.toISOString()}`);
-
+    console.log("🔥 SERVER TIME CHECK");
+    console.log("new Date() =", startedAt);
+    console.log("toISOString() =", startedAt.toISOString());
+    const expiresAt = new Date(startedAt.getTime() + 30 * 1000); 
     // Load semester start date
     const [semRows] = await db.query<SemesterRow[]>(
       `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`
     );
     const semesterStart = new Date(semRows[0].start_date);
     const weekNumber = getAcademicWeek(semesterStart, startedAt);
+    const [classRows] = await conn.query(
+      `SELECT day_of_week, start_time 
+      FROM Class 
+      WHERE class_id = ?`,
+      [class_id]
+    );
+
+    const cls = classRows[0];
+
+    const dayIndexMap = {
+      Monday: 0,
+      Tuesday: 1,
+      Wednesday: 2,
+      Thursday: 3,
+      Friday: 4,
+    } as const;
+
+    const dayIndex = dayIndexMap[cls.day_of_week as keyof typeof dayIndexMap];
+
+    // Compute scheduled date based on semesterStart + week number + class day
+    const scheduled = new Date(semesterStart);
+    scheduled.setDate(semesterStart.getDate() + (weekNumber - 1) * 7 + dayIndex);
+
+    const scheduled_date = scheduled.toISOString().split("T")[0];
     const { online_mode } = req.body;
     const isOnlineMode: boolean = online_mode === true;
 
     const [result] = await conn.query(
-      `INSERT INTO Session (class_id, started_at, expires_at, online_mode, is_expired, week_number)
-      VALUES (?, ?, ?, ?, 0, ?)`,
-      [class_id, startedAt, expiresAt, isOnlineMode ? 1 : 0, weekNumber]
+      `INSERT INTO Session (class_id, started_at, scheduled_date, expires_at, online_mode, is_expired, week_number)
+      VALUES (?, ?, ?, ?, ?, 0, ?)`,
+      [class_id, startedAt, scheduled_date, expiresAt, isOnlineMode ? 1 : 0, weekNumber]
     );
 
     const session_id = (result as any).insertId;
-    console.log(`✅ Session created with ID: ${session_id}`);
 
     await conn.commit();
     conn.release();
@@ -396,17 +438,22 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     io.to(`class_${class_id}`).emit("checkinActivated", {
       class_id: Number(class_id),
       session_id,
-      startedAt,
-      expiresAt,
-      online_mode: isOnlineMode
+      startedAt: startedAt.toISOString(),
+      started_date: scheduled_date,   
+      scheduled_date: scheduled_date, 
+      expiresAt: expiresAt.toISOString(),
+      online_mode: isOnlineMode,
+      week_number: weekNumber
     });
 
     return res.status(201).json({
       message: "Check-in activated",
       session_id,
       started_at: startedAt,
+      scheduled_date: scheduled_date,
       expires_at: expiresAt,
-      online_mode: isOnlineMode
+      online_mode: isOnlineMode,
+      week_number: weekNumber
     });
   } catch (err) {
     console.error("Error activating check-in:", err);

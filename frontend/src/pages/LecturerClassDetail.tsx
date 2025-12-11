@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import socket from "../utils/socket";
@@ -32,6 +32,10 @@ interface Session {
 export default function LecturerClassDetail() {
   const { class_id } = useParams<{ class_id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromWeek = location.state?.fromWeek;
+  const fromSemBreak = location.state?.fromSemBreak;
+  const sessionDate = location.state?.sessionDate;
   const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
@@ -44,65 +48,76 @@ export default function LecturerClassDetail() {
     !session.is_expired &&
     new Date(session.expires_at) > new Date();
 
-  const isExpiredSession =
-    session &&
-    (session.is_expired || new Date(session.expires_at) <= now);
+  const handleBack = () => {
+    navigate('/lecturer', {
+      state: {
+        restoreWeek: fromWeek,
+        restoreSemBreak: fromSemBreak
+      }
+    });
+  };
 
-  const fetchDetails = useCallback(async () => {
+  const fetchDetails = useCallback(async (forceIgnoreDate = false) => {
     if (!class_id) return;
     try {
-    setLoading(true);
-    console.log(`📥 Fetching details for class ${class_id}...`);
-    const res = await axios.get(`http://localhost:3001/lecturer/class/${class_id}/details`);
+      setLoading(true);
 
-    console.log("📦 Details response:", {
-      hasSession: !!res.data.session,
-      session: res.data.session,
-      checkinsCount: res.data.checkins?.length || 0,
-      studentsCount: res.data.students?.length || 0
-    });
-
-    // backend shape: { classInfo, students, session, checkins }
-    setClassInfo(res.data.classInfo || null);
-
-    const rawSession = res.data.session;
-    setSession(
-      rawSession
-        ? {
-            session_id: Number(rawSession.session_id),
-            started_at: rawSession.started_at,
-            expires_at: rawSession.expires_at,
-            online_mode: !!rawSession.online_mode,
-            is_expired: !!rawSession.is_expired,
-          }
-        : null
-    );
-
-    if (res.data.session) {
-      setOnlineMode(res.data.session.online_mode === true);
-    }
-
-    const checkins = res.data.checkins || [];
-    const checkinMap = new Map(
-      checkins.map((c: any) => [c.student_id, c.status])
-    );
-
-    setStudents(
-      (res.data.students || []).map((s: any) => ({
-        student_id: Number(s.student_id),
-        name: s.name,
-        email: s.email,
-        status: checkinMap.has(s.student_id)
-          ? "checked-in"
-          : (res.data.session?.is_expired ? "missed" : "pending"),
-        }))
+      const res = await axios.get(
+        `http://localhost:3001/lecturer/class/${class_id}/details`,
+        {
+          params: forceIgnoreDate ? {} : { date: sessionDate ?? undefined }
+        }
       );
+
+      setClassInfo(res.data.classInfo || null);
+
+      const rawSession = res.data.session;
+      setSession(
+        rawSession
+          ? {
+              session_id: Number(rawSession.session_id),
+              started_at: rawSession.started_at,
+              expires_at: rawSession.expires_at,
+              online_mode: !!rawSession.online_mode,
+              is_expired: !!rawSession.is_expired,
+            }
+          : null
+      );
+
+      if (rawSession) {
+        setOnlineMode(rawSession.online_mode === true);
+      }
+
+      const checkins = res.data.checkins || [];
+      const checkinMap = new Map(checkins.map((c: any) => [c.student_id, c.status]));
+
+      setStudents(
+        (res.data.students || []).map((s: any) => {
+          const isCheckedIn = checkinMap.has(s.student_id);
+
+          let status: "checked-in" | "missed" | "pending" = "pending";
+
+          if (isCheckedIn) {
+            status = "checked-in";
+          } else if (rawSession?.is_expired) {
+            status = "missed";
+          }
+
+          return {
+            student_id: Number(s.student_id),
+            name: s.name,
+            email: s.email,
+            status,
+          };
+        })
+      );
+
     } catch (err) {
-    console.error("❌ Error fetching class details:", err);
+      console.error("Error fetching class details:", err);
     } finally {
-    setLoading(false);
+      setLoading(false);
     }
-  }, [class_id]);
+  }, [class_id, sessionDate]);
 
   // initial fetch
   useEffect(() => {
@@ -142,11 +157,14 @@ export default function LecturerClassDetail() {
       setStudents((prev) => prev.map((s) => (s.student_id === data.student_id ? { ...s, status: "checked-in" } : s)));
     };
 
+    socket.on("sessionExpired", onSessionExpired);
+    socket.on("studentCheckedIn", onStudentCheckedIn);
+
     const onCheckinActivated = async (data: any) => {
       if (data.class_id !== id) return;
-      console.log("🟢 checkinActivated event received:", data);
+      console.log("🟡 Session activated:", data);
 
-      // Update session state immediately from socket data
+      // Update session state
       setSession({
         session_id: data.session_id,
         started_at: data.startedAt,
@@ -155,13 +173,12 @@ export default function LecturerClassDetail() {
         is_expired: false,
       });
 
-      // Refresh full details from backend
-      await fetchDetails();
+      // Refresh page details
+      await fetchDetails(true);
     };
 
-    socket.on("sessionExpired", onSessionExpired);
-    socket.on("studentCheckedIn", onStudentCheckedIn);
     socket.on("checkinActivated", onCheckinActivated);
+
 
     return () => {
       socket.off("sessionExpired", onSessionExpired);
@@ -174,40 +191,26 @@ export default function LecturerClassDetail() {
   const handleActivateCheckIn = async () => {
     if (!class_id) return;
     try {
-    console.log("🟢 Activating check-in for class:", class_id);
     const res = await axios.post(`http://localhost:3001/lecturer/class/${class_id}/activate-checkin`, {
-        online_mode: onlineMode
+        online_mode: onlineMode,
       });
 
-    console.log("✅ Activation response:", res.data);
-
-    // Update session immediately with response data
     setSession({
       session_id: Number(res.data.session_id),
       started_at: res.data.started_at,
       expires_at: res.data.expires_at,
       online_mode: !!res.data.online_mode,
-      is_expired: false,
+      is_expired: !!res.data.is_expired,
     });
 
-    // Reset all students to pending (they haven't checked in yet for this NEW session)
-    setStudents((prev) =>
-      prev.map((s) => ({
-        ...s,
-        status: "pending" as const
-      }))
-    );
-
-    console.log("🔄 Fetching updated details...");
-    // Refresh to ensure we have latest data
-    await fetchDetails();
-    console.log("✅ Details refreshed");
+    // Immediately refresh to ensure checkins and students reflect latest state
+    await fetchDetails(true);
     } catch (err) {
-    console.error("❌ Error activating check-in:", err);
+    console.error("Error activating check-in:", err);
     }
   };
 
-  const [onlineMode, setOnlineMode] = useState<boolean>(true);
+  const [onlineMode, setOnlineMode] = useState<boolean>(false);
 
   const handleManualCheckIn = async (studentId: number) => {
     if (!session) return;
@@ -234,7 +237,7 @@ export default function LecturerClassDetail() {
 
   return (
     <div className="min-h-screen text-white p-8 bg-gradient-to-br from-[#0a0f1f] via-[#0d1b2a] to-[#051923]">
-      <button onClick={() => navigate(-1)} className="mb-4 px-4 py-2 bg-gray-600 rounded hover:bg-gray-500">
+      <button onClick={handleBack} className="mb-4 px-4 py-2 bg-gray-600 rounded hover:bg-gray-500">
         ← Back
       </button>
 
@@ -242,6 +245,7 @@ export default function LecturerClassDetail() {
         <h1 className="text-2xl font-bold mb-2">{classInfo?.class_name}</h1>
         <p>Course Code: {classInfo?.course_code}</p>
         <p>Day: {classInfo?.day_of_week}</p>
+        <p>Date: {sessionDate ? new Date(sessionDate).toLocaleDateString() : "—"}</p>
         <p>
           Time: {classInfo?.start_time} - {classInfo?.end_time} ({classInfo?.class_type})
         </p>

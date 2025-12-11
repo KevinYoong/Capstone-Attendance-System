@@ -34,6 +34,24 @@ interface Semester {
   status: string;
 }
 
+// Compute academic week based on semester start date and today's date
+function getCurrentAcademicWeek(startDateStr: string): number {
+  const startDate = new Date(startDateStr);
+  const today = new Date();
+
+  // Normalize times to midnight
+  startDate.setHours(0, 0, 0, 0);
+  today.setHours(0, 0, 0, 0);
+
+  const diffDays = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+
+  // Week 1 = days 0–6 → week = 1 + (days / 7)
+  const week = Math.floor(diffDays / 7) + 1;
+
+  // Clamp range 1–14
+  return Math.max(1, Math.min(14, week));
+}
+
 export default function StudentDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -48,8 +66,10 @@ export default function StudentDashboard() {
 
   const [activeSessions, setActiveSessions] = useState<Record<number, {
     session_id: number;
+    startedAt: string;
     expiresAt: string;
     onlineMode: boolean;
+    scheduled_date: string;
   }>>({});
 
   // Track which classes the student has checked into
@@ -114,17 +134,27 @@ export default function StudentDashboard() {
       if (!res.data?.success) return;
 
       // Map into activeSessions shape: { [classId]: { session_id, expiresAt, onlineMode } }
-      const map: Record<number, { session_id: number; expiresAt: string; onlineMode: boolean }> = {};
+      const map: Record<number, {
+        session_id: number;
+        startedAt: string;
+        expiresAt: string;
+        onlineMode: boolean;
+        scheduled_date: string;
+      }> = {};
 
       res.data.sessions.forEach((s: any) => {
         map[s.class_id] = {
           session_id: s.session_id,
+          startedAt: new Date(s.started_at).toISOString(),
           expiresAt: new Date(s.expires_at).toISOString(),
           onlineMode: !!s.online_mode,
+          scheduled_date: s.scheduled_date,
         };
       });
 
-      setActiveSessions((prev) => ({ ...prev, ...map }));
+      if (Object.keys(map).length > 0) {
+        setActiveSessions((prev) => ({ ...prev, ...map }));
+      }
     } catch (err) {
       console.error("Error fetching active sessions:", err);
     }
@@ -173,6 +203,7 @@ export default function StudentDashboard() {
     if (!user) return;
 
     // 1) join student rooms first (so socket emits from server that use rooms are honored)
+    console.log("🔌 Joining student rooms for:", user.id);
     socket.emit("joinStudentRooms", user.id);
 
     // 2) fetch semester and schedule (existing)
@@ -183,8 +214,17 @@ export default function StudentDashboard() {
           "http://localhost:3001/semester/current"
         );
         if (res.data.success) {
-          setSemester(res.data.data);
-          setSelectedWeek(res.data.data.current_week);
+          const sem = res.data.data;
+          // compute current week client-side to avoid stale DB value
+          const computedWeek = getCurrentAcademicWeek(sem.start_date);
+          // set semester and selected week using computed value
+          setSemester({
+            ...sem,
+            current_week: computedWeek
+          });
+          // prefer computed week as the default
+          setSelectedWeek(computedWeek);
+          // after setting semester/selectedWeek, fetch attendance summary
           await fetchAttendanceSemester();
         }
       } catch (err) {
@@ -195,14 +235,22 @@ export default function StudentDashboard() {
     };
 
     fetchSemester();
-    fetchSchedule(); 
-
     // 3) **new**: fetch active sessions immediately (so newly-logged students see already-activated sessions)
     fetchActiveSessions();
 
     // ----- SOCKET LISTENERS -----
     socket.on("checkinActivated", (data: any) => {
-      console.log("Activated:", data);
+      console.log("📥 STUDENT RECEIVED ACTIVATION");
+      console.log("Raw payload:", data);
+
+      const rawStarted = data.startedAt ?? data.started_at;
+      const rawExpires = data.expiresAt ?? data.expires_at;
+
+      console.log("Raw started:", rawStarted, "→ parsed:", new Date(rawStarted).toISOString());
+      console.log("Raw expires:", rawExpires, "→ parsed:", new Date(rawExpires).toISOString());
+
+      console.log("Student local time:", new Date().toISOString());
+      console.log("---------------------------------------------------");
 
       // support both server naming variants: online_mode or onlineMode
       const onlineMode = data.online_mode ?? data.onlineMode ?? false;
@@ -211,8 +259,10 @@ export default function StudentDashboard() {
         ...prev,
         [data.class_id]: {
           session_id: data.session_id,
-          expiresAt: data.expiresAt ?? data.expires_at ?? new Date().toISOString(),
+          startedAt: new Date(data.startedAt ?? data.started_at).toISOString(),
+          expiresAt: new Date(data.expiresAt ?? data.expires_at).toISOString(),
           onlineMode: !!onlineMode,
+          scheduled_date: data.scheduled_date,
         },
       }));
     });
@@ -250,7 +300,7 @@ export default function StudentDashboard() {
       socket.off("sessionExpired");
       socket.emit("leaveStudentRooms", user.id);
     };
-  }, [user, fetchSchedule, fetchActiveSessions]);
+  }, [user?.id]); 
 
   useEffect(() => {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
@@ -581,10 +631,41 @@ export default function StudentDashboard() {
                   // Determine status
                   const isCheckedIn = sessionForThisWeek?.student_status === "present";
                   const isMissed = sessionForThisWeek?.student_status === "missed";
-                  const isActive =
-                    activeSessions[cls.class_id] !== undefined &&
-                    !isCheckedIn &&
-                    !isMissed;
+
+                  // --- FIX: Only activate if session date matches THIS week's date ---
+                  let isActive = false;
+
+                  const active = activeSessions[cls.class_id];
+                  if (active) {
+
+                  const classDayIndex = {
+                    Monday: 0,
+                    Tuesday: 1,
+                    Wednesday: 2,
+                    Thursday: 3,
+                    Friday: 4
+                  }[day] ?? 0;
+
+                  const weekStartDate = new Date(semester.start_date);
+                  weekStartDate.setDate(weekStartDate.getDate() + (selectedWeek - 1) * 7);
+
+                  const targetDate = new Date(weekStartDate);
+                  targetDate.setDate(weekStartDate.getDate() + classDayIndex);
+
+                  const targetDateStr = targetDate.toISOString().split("T")[0];
+                  const activeDateStr = active.scheduled_date;
+
+                  console.log("---- DATE MATCH CHECK ----");
+                  console.log("Class:", cls.class_id, cls.class_name);
+                  console.log("Day:", day);
+                  console.log("WeekStart:", weekStartDate);
+                  console.log("Computed targetDateStr:", targetDateStr);
+                  console.log("Session activeDateStr:", activeDateStr);
+                  console.log("Match?", activeDateStr === targetDateStr);
+                  console.log("---------------------------");
+
+                  isActive = activeDateStr === targetDateStr && !isCheckedIn && !isMissed;
+                }
 
                   return (
                     <div

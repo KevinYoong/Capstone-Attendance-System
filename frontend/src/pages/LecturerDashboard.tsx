@@ -1,5 +1,5 @@
 import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 
@@ -50,9 +50,21 @@ function getCurrentAcademicWeek(startDateStr: string): number {
   return Math.max(1, Math.min(14, week));
 }
 
+function formatLocalYMD(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export default function LecturerDashboard() {
   const { user, logout } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
+
+  const restoreWeek = location.state?.restoreWeek;
+  const restoreSemBreak = location.state?.restoreSemBreak;
+
   const [weekSchedule, setWeekSchedule] = useState<Week>({
     Monday: [],
     Tuesday: [],
@@ -117,7 +129,8 @@ export default function LecturerDashboard() {
             ...sem,
             current_week: computedWeek
           });
-          setSelectedWeek(computedWeek);
+          setSelectedWeek(restoreWeek ?? computedWeek);
+          setIsViewingSemBreak(restoreSemBreak ?? false);
         }
       } catch (err) {
         console.error('Error fetching semester:', err);
@@ -172,20 +185,16 @@ export default function LecturerDashboard() {
 
         const classList = res.data.classes || [];
         const set = new Set<string>();
-
+ 
         classList.forEach((c: any) => {
           if (c.sessions && c.sessions.length > 0) {
             c.sessions.forEach((session: any) => {
-              // Backend now returns started_date in YYYY-MM-DD format
-              const sessionDate = session.started_date;
-              const key = `${c.class_id}_${sessionDate}`;
-              console.log(`[DEBUG] Adding past session: ${key}`);
+              const localDate = formatLocalYMD(new Date(session.started_date));
+              const key = `${c.class_id}_${localDate}`;
               set.add(key);
             });
           }
         });
-
-        console.log('[DEBUG] Past activated sessions:', Array.from(set));
         setPastActivatedSessions(set);
       } catch (err) {
         console.error("Error fetching past activations:", err);
@@ -200,50 +209,6 @@ export default function LecturerDashboard() {
     if (Object.keys(weekSchedule).includes(today)) {
       setOpenDays([today]);
     }
-  }, [user]);
-
-  // Listen for page visibility to refresh when returning to tab
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible' && user) {
-        console.log('[DEBUG] Page became visible, refetching past activations');
-
-        const fetchPastActivations = async () => {
-          try {
-            const res = await axios.get(
-              `http://localhost:3001/lecturer/${user.id}/attendance/semester`
-            );
-
-            if (!res.data?.success) return;
-
-            const classList = res.data.classes || [];
-            const set = new Set<string>();
-
-            classList.forEach((c: any) => {
-              if (c.sessions && c.sessions.length > 0) {
-                c.sessions.forEach((session: any) => {
-                  const sessionDate = session.started_date;
-                  const key = `${c.class_id}_${sessionDate}`;
-                  set.add(key);
-                });
-              }
-            });
-
-            console.log('[DEBUG] Past activated sessions refreshed:', Array.from(set));
-            setPastActivatedSessions(set);
-          } catch (err) {
-            console.error("Error fetching past activations:", err);
-          }
-        };
-
-        fetchPastActivations();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
   }, [user]);
 
   // Refetch schedule when selectedWeek changes
@@ -347,20 +312,18 @@ export default function LecturerDashboard() {
     const dayIndex = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 }[dayName] || 0;
     const semesterStart = new Date(semester.start_date);
 
-    // Calculate days offset: (selectedWeek - 1) * 7 days + dayIndex
     const daysOffset = (selectedWeek - 1) * 7 + dayIndex;
     const targetDate = new Date(semesterStart);
     targetDate.setDate(semesterStart.getDate() + daysOffset);
 
-    // Format as YYYY-MM-DD using local time (not UTC) to match backend's DATE() function
-    const year = targetDate.getFullYear();
-    const month = String(targetDate.getMonth() + 1).padStart(2, '0');
-    const day = String(targetDate.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+    // FIXED: Use local YYYY-MM-DD
+    return targetDate.toLocaleDateString("en-CA"); 
   };
 
-  const handleActivateCheckIn = (classId: number) => {
-    navigate(`/lecturer/class/${classId}`);
+  const handleActivateCheckIn = (classId: number, day: string) => {
+    navigate(`/lecturer/class/${classId}`, {
+      state: { fromWeek: selectedWeek, fromSemBreak: isViewingSemBreak, sessionDate: getFullDateForDay(day) }
+    });
   };
 
   return (
@@ -519,45 +482,39 @@ export default function LecturerDashboard() {
                 {classes.length === 0 ? (
                   <p className="text-gray-400 px-4 py-2 text-center">No classes today.</p>
                 ) : (
-                  classes.map((cls, idx) => {
-                    const dateKey = `${cls.class_id}_${getFullDateForDay(day)}`;
-                    const isPastActivated = pastActivatedSessions.has(dateKey);
-                    console.log(`[DEBUG] ${day} ${cls.class_name}: checking ${dateKey} = ${isPastActivated}`);
-
-                    return (
-                      <div
-                        key={cls.class_id}
-                        className={`px-4 py-3 ${
-                          idx < classes.length - 1 ? 'border-b border-white/20' : ''
-                        } flex flex-col md:flex-row justify-between items-start md:items-center gap-2`}
-                      >
-                        <div>
-                          <h3 className="font-semibold text-lg">
-                            {cls.class_name} ({cls.course_code})
-                          </h3>
-                          <p className="text-gray-400">
-                            {cls.start_time} - {cls.end_time} ({cls.class_type})
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => handleActivateCheckIn(cls.class_id)}
-                          className={`mt-2 md:mt-0 px-4 py-2 text-white rounded-lg transition ${
-                            activeSessions[cls.class_id]
-                              ? "bg-green-600 hover:bg-green-500"
-                              : isPastActivated
-                                ? "bg-blue-600 hover:bg-blue-500"
-                                : "bg-gray-500 hover:bg-gray-400"
-                          }`}
-                        >
-                          {activeSessions[cls.class_id]
-                            ? "Active Now"
-                            : isPastActivated
-                              ? "Previously Activated"
-                              : "Activate Check-In"}
-                        </button>
+                  classes.map((cls, idx) => (
+                    <div
+                      key={cls.class_id}
+                      className={`px-4 py-3 ${
+                        idx < classes.length - 1 ? 'border-b border-white/20' : ''
+                      } flex flex-col md:flex-row justify-between items-start md:items-center gap-2`}
+                    >
+                      <div>
+                        <h3 className="font-semibold text-lg">
+                          {cls.class_name} ({cls.course_code})
+                        </h3>
+                        <p className="text-gray-400">
+                          {cls.start_time} - {cls.end_time} ({cls.class_type})
+                        </p>
                       </div>
-                    );
-                  })
+                      <button
+                        onClick={() => handleActivateCheckIn(cls.class_id, day)}
+                        className={`mt-2 md:mt-0 px-4 py-2 text-white rounded-lg transition ${
+                          activeSessions[cls.class_id]
+                            ? "bg-green-600 hover:bg-green-500"                            
+                            : pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`)
+                              ? "bg-blue-600 hover:bg-blue-500"
+                              : "bg-gray-500 hover:bg-gray-400"
+                        }`}
+                      >
+                        {activeSessions[cls.class_id]
+                          ? "Active Now"
+                          : pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`)
+                            ? "Previously Activated"
+                            : "Activate Check-In"}
+                      </button>
+                    </div>
+                  ))
                 )}
               </div>
             </div>
