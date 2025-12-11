@@ -544,68 +544,71 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
   const { lecturer_id } = req.params;
 
   try {
-    // 1. Get active semester
+    // Get active semester
     const [semRows] = await db.query<any[]>(
       `SELECT * FROM Semester WHERE status='active' LIMIT 1`
     );
-
     if (semRows.length === 0)
       return res.status(404).json({ success: false, message: "No active semester" });
 
     const semester = semRows[0];
 
-    // 2. Fetch all classes for this lecturer
+    // Fetch all classes under this lecturer
     const [classRows] = await db.query<any[]>(
-      `
-      SELECT class_id, class_name, course_code
-      FROM Class
-      WHERE lecturer_id = ?
-      ORDER BY class_name
-      `,
+      `SELECT class_id, class_name, course_code
+       FROM Class
+       WHERE lecturer_id = ?
+       ORDER BY class_name`,
       [lecturer_id]
     );
 
     const results: any[] = [];
 
     for (const cls of classRows) {
-      // 3. Get all sessions within semester
+
+      // 1) Get all sessions actually held this semester
       const [sessions] = await db.query<any[]>(
-        `
-        SELECT session_id
-        FROM Session
-        WHERE class_id = ?
-          AND started_at BETWEEN ? AND ?
-        `,
+        `SELECT session_id
+         FROM Session
+         WHERE class_id = ?
+           AND started_at BETWEEN ? AND ?
+         ORDER BY started_at ASC`,
         [cls.class_id, semester.start_date, semester.end_date]
       );
+
+      const totalSessions = sessions.length;
 
       let presentCount = 0;
       let missedCount = 0;
 
+      // 2) For each session, count present and missed students
       for (const sess of sessions) {
+
+        // Count present
         const [presentRows] = await db.query<any[]>(
           `SELECT COUNT(*) AS count FROM Checkin WHERE session_id = ?`,
           [sess.session_id]
         );
-
         const present = presentRows[0].count;
 
-        // Count all enrolled students
+        // Count enrolled students
         const [totalRows] = await db.query<any[]>(
           `SELECT COUNT(*) AS count FROM StudentClass WHERE class_id = ?`,
           [cls.class_id]
         );
+        const totalStudents = totalRows[0].count;
 
-        const total = totalRows[0].count;
-        const missed = total - present;
+        const missed = totalStudents - present;
 
         presentCount += present;
         missedCount += missed;
       }
 
-      const totalSessions = sessions.length;
+      // 3) Actual attendance rate based ONLY on actual sessions
       const attendanceRate =
-        totalSessions === 0 ? 0 : Math.round((presentCount / (presentCount + missedCount)) * 100);
+        (presentCount + missedCount) === 0
+          ? 0
+          : Math.round((presentCount / (presentCount + missedCount)) * 100);
 
       let status: "good" | "warning" | "critical";
       if (attendanceRate >= 90) status = "good";
@@ -616,11 +619,12 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
         class_id: cls.class_id,
         class_name: cls.class_name,
         course_code: cls.course_code,
-        total_sessions: totalSessions,
-        present_count: presentCount,
-        missed_count: missedCount,
+
+        total_sessions: totalSessions,  // 👈 ACTUAL sessions
+        present_count: presentCount,    // 👈 ACTUAL present
+        missed_count: missedCount,      // 👈 ACTUAL missed
         attendance_rate: attendanceRate,
-        attendance_status: status
+        attendance_status: status,
       });
     }
 
@@ -720,8 +724,10 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
 
     // Build student list with rates
     const studentList = Object.values(studentMap).map((s: any) => {
-      const total = s.present_count + s.missed_count;
-      const rate = total === 0 ? 0 : Math.round((s.present_count / total) * 100);
+      const FINAL_TOTAL = 14;
+      const missedFinal = s.missed_count;
+      const presentFinal = FINAL_TOTAL - missedFinal;
+      const rate = Math.round((presentFinal / FINAL_TOTAL) * 100);
 
       let status: "good" | "warning" | "critical";
       if (rate >= 90) status = "good";
@@ -793,8 +799,10 @@ router.get("/:lecturer_id/analytics/class/:class_id/export.csv", async (req: Req
         );
 
         const present = presentRows[0].count;
-        const missed = sessions.length - present;
-        const rate = sessions.length === 0 ? 0 : Math.round((present / sessions.length) * 100);
+        
+        const FINAL_TOTAL = 14;
+        const missed = FINAL_TOTAL - present;
+        const rate = Math.round((present / FINAL_TOTAL) * 100);
 
         const status = rate >= 90 ? "good" : rate >= 80 ? "warning" : "critical";
 
