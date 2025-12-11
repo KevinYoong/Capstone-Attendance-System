@@ -416,6 +416,8 @@ type ClassType = typeof VALID_CLASS_TYPES[number];
  * GET /admin/lecturers
  * - q: search by name/email
  * - page, limit
+ * - sortBy: 'name' | 'email' | 'lecturer_id'
+ * - order: 'asc' | 'desc'
  * Response: { success: true, data: { lecturers: [...], total, page, limit } }
  */
 router.get("/lecturers", async (req: Request, res: Response) => {
@@ -425,6 +427,14 @@ router.get("/lecturers", async (req: Request, res: Response) => {
     const limit = Math.max(1, parseInt((req.query.limit as string) || "50", 10));
     const offset = (page - 1) * limit;
 
+    // Sorting Params (Matches what we added to Frontend)
+    const sortBy = (req.query.sortBy as string) || "lecturer_id";
+    const order = (req.query.order as string) === "asc" ? "ASC" : "DESC";
+
+    // Validate sort column
+    const validSorts = ["lecturer_id", "name", "email"];
+    const sortColumn = validSorts.includes(sortBy) ? `Lecturer.${sortBy}` : "Lecturer.lecturer_id";
+
     const whereClauses: string[] = [];
     const params: any[] = [];
     if (q) {
@@ -433,20 +443,31 @@ router.get("/lecturers", async (req: Request, res: Response) => {
     }
     const whereSql = whereClauses.length ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
-    // fetch lecturers + optional classes_assigned list (small subset)
+    // UPDATED SQL: Uses JSON_ARRAYAGG to get the list of classes
     const listSql = `
       SELECT
         Lecturer.lecturer_id,
         Lecturer.name,
         Lecturer.email,
-        IFNULL(COUNT(Class.class_id), 0) AS classes_count
+        COUNT(Class.class_id) AS classes_count,
+        COALESCE(
+          JSON_ARRAYAGG(
+            JSON_OBJECT(
+              'class_id', Class.class_id,
+              'class_name', Class.class_name,
+              'course_code', Class.course_code
+            )
+          ),
+          JSON_ARRAY()
+        ) as classes_json
       FROM Lecturer
       LEFT JOIN Class ON Lecturer.lecturer_id = Class.lecturer_id
       ${whereSql}
       GROUP BY Lecturer.lecturer_id
-      ORDER BY Lecturer.lecturer_id DESC
+      ORDER BY ${sortColumn} ${order}
       LIMIT ? OFFSET ?
     `;
+
     const countSql = `
       SELECT COUNT(*) AS total FROM (
         SELECT Lecturer.lecturer_id FROM Lecturer
@@ -460,13 +481,28 @@ router.get("/lecturers", async (req: Request, res: Response) => {
     const [rows] = await db.query<any[]>(listSql, listParams);
     const [countRows] = await db.query<any[]>(countSql, params);
 
-    const lecturers = rows.map(r => ({
-      lecturer_id: Number(r.lecturer_id),
-      name: r.name,
-      email: r.email,
-      classes_assigned: [], // frontend may fetch classes separately or we can expand later
-      classes_count: Number(r.classes_count) || 0,
-    }));
+    const lecturers = rows.map((r) => {
+      // Parse the JSON string from MySQL
+      let classes = r.classes_json;
+      if (typeof classes === 'string') {
+        try { classes = JSON.parse(classes); } catch(e) { classes = []; }
+      }
+      
+      // Filter out nulls (caused by LEFT JOIN on lecturers with 0 classes)
+      if (Array.isArray(classes)) {
+        classes = classes.filter((c: any) => c && c.class_id);
+      } else {
+        classes = [];
+      }
+
+      return {
+        lecturer_id: Number(r.lecturer_id),
+        name: r.name,
+        email: r.email,
+        classes_assigned: classes, // Now populated!
+        classes_count: Number(r.classes_count) || 0,
+      };
+    });
 
     const total = countRows[0]?.total ?? 0;
     res.json({ success: true, data: { lecturers, total, page, limit } });

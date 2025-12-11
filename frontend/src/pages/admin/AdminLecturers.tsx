@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import adminApi from "../../utils/adminApi";
 import {
   UserPlus,
@@ -9,6 +9,8 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronUp,
+  ArrowUpDown, // Import for sorting
+  Search,      // Import for search bar
 } from "lucide-react";
 
 interface ClassItem {
@@ -21,21 +23,25 @@ interface Lecturer {
   lecturer_id: number;
   name: string;
   email: string;
-  // optional: classes assigned; frontend will display them
   classes_assigned?: ClassItem[];
+  classes_count?: number; // Backend might send this
 }
 
-const ROWS_PER_PAGE = 25;
+// 6. Reduced rows per page
+const ROWS_PER_PAGE = 10;
 
 export default function AdminLecturers() {
   const [lecturers, setLecturers] = useState<Lecturer[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Pagination
+  // Pagination & Filtering
   const [currentPage, setCurrentPage] = useState<number>(1);
+  const [totalItems, setTotalItems] = useState<number>(0);
+  const [query, setQuery] = useState("");
 
-  // Search
-  const [query, setQuery] = useState<string>("");
+  // Sorting
+  const [sortField, setSortField] = useState<string>("lecturer_id"); // Default sort
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
   // Expand rows (show classes)
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
@@ -47,7 +53,7 @@ export default function AdminLecturers() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [selectedLecturer, setSelectedLecturer] = useState<Lecturer | null>(null);
 
-  // Form state for create / edit / reset
+  // Form state
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -58,35 +64,55 @@ export default function AdminLecturers() {
     async function fetchLecturers() {
         setLoading(true);
         try {
-        const res = await adminApi.get("/admin/lecturers");
-        setLecturers(res.data.data.lecturers || []);
+          // Backend needs to support these query params (update adminRoutes.ts if needed)
+          // Assuming /admin/lecturers supports q, page, limit, sortBy, order similar to students
+          const res = await adminApi.get("/admin/lecturers", {
+            params: {
+              q: query,
+              page: currentPage,
+              limit: ROWS_PER_PAGE,
+              sortBy: sortField,
+              order: sortOrder
+            }
+          });
+          
+          setLecturers(res.data.data.lecturers || []);
+          setTotalItems(res.data.data.total || 0);
         } catch (err) {
-        console.error("Error loading lecturers", err);
-        alert("Failed to load lecturers");
+          console.error("Error loading lecturers", err);
+          setLecturers([]);
         } finally {
-        setLoading(false);
+          setLoading(false);
         }
     }
-    fetchLecturers();
-  }, []); 
+    const timeoutId = setTimeout(() => fetchLecturers(), 300);
+    return () => clearTimeout(timeoutId);
+  }, [currentPage, query, sortField, sortOrder]); 
 
-  // Filtered + searched list
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return lecturers;
-    return lecturers.filter((l) =>
-      String(l.lecturer_id).includes(q) ||
-      l.name.toLowerCase().includes(q) ||
-      l.email.toLowerCase().includes(q)
+  // Sort Handler
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortOrder("asc");
+    }
+    setCurrentPage(1);
+  };
+
+  const renderSortIcon = (field: string) => {
+    if (sortField !== field) {
+      return <ArrowUpDown size={14} className="text-gray-500 group-hover:text-blue-400" />;
+    }
+    return sortOrder === "asc" ? (
+      <ChevronUp size={14} className="text-blue-400" />
+    ) : (
+      <ChevronDown size={14} className="text-blue-400" />
     );
-  }, [lecturers, query]);
+  };
 
-  // Pagination math
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
-  const startIndex = (currentPage - 1) * ROWS_PER_PAGE;
-  const pageItems = filtered.slice(startIndex, startIndex + ROWS_PER_PAGE);
+  const totalPages = Math.max(1, Math.ceil(totalItems / ROWS_PER_PAGE));
 
-  // Expand / collapse a row
   const toggleRow = (id: number) => {
     setExpandedRows((prev) => {
       const copy = new Set(prev);
@@ -96,7 +122,7 @@ export default function AdminLecturers() {
     });
   };
 
-  // ---------- Handlers for Modals ----------
+// ---------- Handlers for Modals ----------
   const openCreate = () => {
     setForm({ name: "", email: "", password: "" });
     setShowCreateModal(true);
@@ -121,239 +147,206 @@ export default function AdminLecturers() {
 
   const handleCreate = async () => {
     try {
-        const payload = {
-        name: form.name,
-        email: form.email,
-        password: form.password,
-        };
-
+        const payload = { name: form.name, email: form.email, password: form.password };
         const res = await adminApi.post("/admin/lecturers", payload);
-
-        // Append new lecturer to the list
-        setLecturers((prev) => [res.data.data, ...prev]);
-
+        // Re-fetch to respect sort order, or optimistically append
+        setLecturers((prev) => [res.data.data, ...prev]); 
         setShowCreateModal(false);
-    } catch (err) {
-        console.error("Create error", err);
-        alert("Failed to create lecturer");
-    }
+    } catch (err) { console.error(err); alert("Failed to create lecturer"); }
   };
 
   const handleEdit = async () => {
+    if (!selectedLecturer) return;
     try {
-        if (!selectedLecturer) return;
-
         const payload = { name: form.name };
-
         const res = await adminApi.put(`/admin/lecturers/${selectedLecturer.lecturer_id}`, payload);
-
-        // update frontend state
-        setLecturers((prev) =>
-        prev.map((l) =>
-            l.lecturer_id === selectedLecturer.lecturer_id ? res.data.data : l
-        )
-        );
-
-        setShowEditModal(false);
-        setSelectedLecturer(null);
-    } catch (err) {
-        console.error("Edit error", err);
-        alert("Failed to update lecturer");
-    }
+        setLecturers((prev) => prev.map((l) => l.lecturer_id === selectedLecturer.lecturer_id ? res.data.data : l));
+        setShowEditModal(false); setSelectedLecturer(null);
+    } catch (err) { console.error(err); alert("Failed to update lecturer"); }
   };
 
   const handleResetPassword = async () => {
+    if (!selectedLecturer) return;
     try {
-        if (!selectedLecturer) return;
-
-        const payload = { password: form.password };
-
-        await adminApi.post(`/admin/lecturers/${selectedLecturer.lecturer_id}/reset-password`, payload);
-
-        setShowResetModal(false);
-        setSelectedLecturer(null);
-        setForm({ name: "", email: "", password: "" });
-    } catch (err) {
-        console.error("Reset password error", err);
-        alert("Failed to reset password");
-    }
+        await adminApi.post(`/admin/lecturers/${selectedLecturer.lecturer_id}/reset-password`, { password: form.password });
+        setShowResetModal(false); setSelectedLecturer(null);
+    } catch (err) { console.error(err); alert("Failed to reset password"); }
   };
 
   const handleDelete = async () => {
+    if (!selectedLecturer) return;
     try {
-        if (!selectedLecturer) return;
-
         await adminApi.delete(`/admin/lecturers/${selectedLecturer.lecturer_id}`);
-
-        setLecturers((prev) =>
-        prev.filter((l) => l.lecturer_id !== selectedLecturer.lecturer_id)
-        );
-
-        setShowDeleteModal(false);
-        setSelectedLecturer(null);
-    } catch (err) {
-        console.error("Delete error", err);
-        alert("Failed to delete lecturer");
-    }
+        setLecturers((prev) => prev.filter((l) => l.lecturer_id !== selectedLecturer.lecturer_id));
+        setShowDeleteModal(false); setSelectedLecturer(null);
+    } catch (err) { console.error(err); alert("Failed to delete lecturer"); }
   };
-
-  // Keep current page valid when filtered size changes
-  useEffect(() => {
-    if (currentPage > totalPages) setCurrentPage(totalPages);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalPages]);
 
   return (
     <div className="p-8 text-white">
-      <div className="flex justify-between items-center mb-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <h1 className="text-3xl font-bold">Manage Lecturers</h1>
 
-        <div className="flex items-center gap-3">
-          <input
-            placeholder="Search by id, name or email..."
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="px-4 py-2 rounded-lg bg-[#101010] border border-white/10 text-gray-200 w-[320px]"
-          />
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          {/* 3. Updated Search Bar Placeholder (No ID) */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+            <input 
+              type="text"
+              placeholder="Search by name or email..." 
+              className="pl-10 pr-4 py-2 bg-[#101010] border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500 w-full sm:w-64 transition"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setCurrentPage(1);
+              }}
+            />
+          </div>
 
           <button
             onClick={openCreate}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg flex items-center gap-2"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg flex items-center justify-center gap-2 transition"
           >
             <UserPlus size={16} /> Add Lecturer
           </button>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="bg-[#181818]/70 rounded-xl border border-white/10 overflow-hidden">
-        <table className="w-full text-left">
-          <thead className="bg-[#1f1f2f] text-gray-300">
-            <tr>
-              <th className="p-4">Lecturer ID</th>
-              <th className="p-4">Name</th>
-              <th className="p-4">Email</th>
-              <th className="p-4">Classes</th>
-              <th className="p-4 text-right">Actions</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {loading ? (
+      {/* Table Container */}
+      <div className="bg-[#181818]/80 rounded-xl border border-white/10 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-gray-300">
+            <thead className="bg-[#1f1f2f] text-gray-300">
               <tr>
-                <td colSpan={5} className="p-6 text-center text-gray-400">
-                  Loading...
-                </td>
+                {/* 3. Removed Lecturer ID Column */}
+                
+                {/* 4. Sortable Name Header */}
+                <th 
+                  className="py-4 px-6 text-center whitespace-nowrap cursor-pointer hover:bg-white/5 transition group"
+                  onClick={() => handleSort("name")}
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    Name
+                    {renderSortIcon("name")}
+                  </div>
+                </th>
+
+                <th className="py-4 px-6 text-center whitespace-nowrap">Email</th>
+                <th className="py-4 px-6 text-center whitespace-nowrap">Classes</th>
+                <th className="py-4 px-6 text-center whitespace-nowrap">Actions</th>
               </tr>
-            ) : pageItems.length === 0 ? (
-              <tr>
-                <td colSpan={5} className="p-6 text-center text-gray-400">
-                  No lecturers found.
-                </td>
-              </tr>
-            ) : (
-              pageItems.map((lec) => {
-                const isExpanded = expandedRows.has(lec.lecturer_id);
-                const classesCount = lec.classes_assigned?.length ?? 0;
-                return (
-                  <tbody key={lec.lecturer_id}>
-                    <tr className="border-t border-white/5 hover:bg-[#222233]">
-                      <td className="p-4 align-top">{lec.lecturer_id}</td>
+            </thead>
 
-                      <td className="p-4 align-top">{lec.name}</td>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={4} className="p-6 text-center text-gray-400">Loading...</td></tr>
+              ) : lecturers.length === 0 ? (
+                <tr><td colSpan={4} className="p-6 text-center text-gray-400">No lecturers found.</td></tr>
+              ) : (
+                lecturers.map((lec) => {
+                  const isExpanded = expandedRows.has(lec.lecturer_id);
+                  // 2. Determine class count from actual array or fallback count
+                  const classesCount = lec.classes_assigned?.length ?? lec.classes_count ?? 0;
 
-                      <td className="p-4 align-top">
-                        <div className="max-w-[280px] truncate">{lec.email}</div>
-                      </td>
+                  return (
+                    // 1. React.Fragment fixes the table nesting bug
+                    <React.Fragment key={lec.lecturer_id}>
+                      <tr className="border-t border-white/5 hover:bg-[#222233] transition-colors">
+                        
+                        <td className="py-4 px-6 text-center whitespace-nowrap font-medium text-white">
+                          {lec.name}
+                        </td>
 
-                      <td className="p-4 align-top">
-                        <button
-                          onClick={() => toggleRow(lec.lecturer_id)}
-                          className="flex items-center gap-2 text-sm text-gray-300 hover:text-white"
-                        >
-                          {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                          <span>
-                            {isExpanded ? "Hide classes" : `▼ ${classesCount} classes`}
-                          </span>
-                        </button>
-                      </td>
+                        <td className="py-4 px-6 text-center whitespace-nowrap">
+                          {lec.email}
+                        </td>
 
-                      <td className="p-4 text-right align-top flex justify-end gap-3">
-                        <button
-                          title="Edit name"
-                          onClick={() => openEdit(lec)}
-                          className="text-yellow-400 hover:text-yellow-300"
-                        >
-                          <Edit size={16} />
-                        </button>
+                        <td className="py-4 px-6 text-center whitespace-nowrap">
+                          <button
+                            onClick={() => toggleRow(lec.lecturer_id)}
+                            className="inline-flex items-center justify-center gap-2 text-gray-300 hover:text-white transition"
+                          >
+                            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            {classesCount} classes
+                          </button>
+                        </td>
 
-                        <button
-                          title="Reset password"
-                          onClick={() => openReset(lec)}
-                          className="text-blue-400 hover:text-blue-300"
-                        >
-                          <KeyRound size={16} />
-                        </button>
+                        <td className="py-4 px-6 flex justify-center gap-3 whitespace-nowrap">
+                          
+                          {/* 5. Tooltips on Action Buttons */}
+                          <div className="relative group">
+                            <button
+                              onClick={() => openEdit(lec)}
+                              className="p-2 text-yellow-400 hover:text-yellow-300 hover:bg-white/10 rounded-lg transition"
+                            >
+                              <Edit size={16} />
+                            </button>
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Edit Name</div>
+                          </div>
 
-                        <button
-                          title="Delete lecturer"
-                          onClick={() => openDelete(lec)}
-                          className="text-red-400 hover:text-red-300"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
+                          <div className="relative group">
+                            <button
+                              onClick={() => openReset(lec)}
+                              className="p-2 text-blue-400 hover:text-blue-300 hover:bg-white/10 rounded-lg transition"
+                            >
+                              <KeyRound size={16} />
+                            </button>
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Reset Password</div>
+                          </div>
 
-                    {/* Expanded row showing class list */}
-                    {isExpanded && (
-                      <tr className="bg-[#15151b]">
-                        <td colSpan={5} className="p-4 border-t border-white/5">
-                          {classesCount === 0 ? (
-                            <div className="text-gray-400 italic">No classes assigned.</div>
-                          ) : (
-                            <ul className="space-y-1">
-                              {lec.classes_assigned!.map((c) => (
-                                <li key={c.class_id} className="text-gray-200">
-                                  • {c.class_name} {c.course_code ? `(${c.course_code})` : ""}
-                                </li>
-                              ))}
-                            </ul>
-                          )}
+                          <div className="relative group">
+                            <button
+                              onClick={() => openDelete(lec)}
+                              className="p-2 text-red-400 hover:text-red-300 hover:bg-white/10 rounded-lg transition"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Delete</div>
+                          </div>
+
                         </td>
                       </tr>
-                    )}
-                  </tbody>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+
+                      {/* 2. Expanded Class List */}
+                      {isExpanded && (
+                        <tr className="bg-[#15151b] border-t border-white/5 animate-in fade-in slide-in-from-top-2 duration-200">
+                          <td colSpan={4} className="p-4">
+                            <div className="pl-10 text-left">
+                              <h4 className="text-sm uppercase text-gray-500 font-bold mb-2">Assigned Classes</h4>
+                              {lec.classes_assigned && lec.classes_assigned.length > 0 ? (
+                                <ul className="space-y-1 text-gray-300">
+                                  {lec.classes_assigned.map((c) => (
+                                    <li key={c.class_id} className="flex items-center gap-2">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                                      <span className="font-medium text-white">{c.class_name}</span>
+                                      {c.course_code && <span className="text-gray-500">({c.course_code})</span>}
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="text-gray-500 italic">No classes assigned.</p>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
-      {/* Pagination */}
+      {/* Pagination Controls */}
       <div className="flex justify-center items-center gap-4 mt-6">
-        <button
-          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-          disabled={currentPage === 1}
-          className="p-2 disabled:opacity-30"
-        >
+        <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition">
           <ChevronLeft />
         </button>
-
-        <p>
-          Page <span className="font-semibold">{currentPage}</span> of{" "}
-          {totalPages}
-        </p>
-
-        <button
-          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-          disabled={currentPage === totalPages}
-          className="p-2 disabled:opacity-30"
-        >
+        <p className="text-gray-300">Page <span className="font-bold text-white">{currentPage}</span> of {totalPages}</p>
+        <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition">
           <ChevronRight />
         </button>
       </div>
