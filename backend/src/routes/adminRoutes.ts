@@ -1,4 +1,3 @@
-// backend/src/routes/adminRoutes.ts
 import express, { Request, Response } from "express";
 import type { PoolConnection } from "mysql2/promise";
 import db from "../../db";
@@ -17,12 +16,11 @@ function isValid8DigitId(id: string | number): boolean {
 
 /**
  * GET /admin/students
- * Optional query params:
- *   - q: search by name OR email OR student_id
- *   - page: page number (1-indexed)
- *   - limit: page size
- *
- * Response: { success: true, data: { students: [...], total: number, page, limit } }
+ * Query params:
+ * - q: search
+ * - page, limit
+ * - sortBy: 'student_id' | 'name' | 'email'
+ * - order: 'asc' | 'desc'
  */
 router.get("/students", async (req: Request, res: Response) => {
   try {
@@ -31,8 +29,13 @@ router.get("/students", async (req: Request, res: Response) => {
     const limit = Math.max(1, parseInt((req.query.limit as string) || "50", 10));
     const offset = (page - 1) * limit;
 
-    // Use a single query with LEFT JOIN to count class enrollments
-    // and a second query for total count matching the filter
+    // Sorting params
+    const sortBy = (req.query.sortBy as string) || "student_id";
+    const order = (req.query.order as string) === "asc" ? "ASC" : "DESC";
+
+    const validSorts = ["student_id", "name", "email"];
+    const sortColumn = validSorts.includes(sortBy) ? `Student.${sortBy}` : "Student.student_id";
+
     const whereClauses: string[] = [];
     const params: any[] = [];
 
@@ -45,17 +48,29 @@ router.get("/students", async (req: Request, res: Response) => {
 
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : "";
 
+    // UPDATED QUERY: Joins Class table and aggregates results into a JSON array
     const listSql = `
       SELECT
         Student.student_id,
         Student.name,
         Student.email,
-        IFNULL(COUNT(StudentClass.student_id), 0) AS classes_enrolled
+        COUNT(StudentClass.class_id) as classes_count,
+        COALESCE(
+          JSON_ARRAYAGG(
+            JSON_OBJECT(
+              'class_id', Class.class_id,
+              'class_name', Class.class_name,
+              'course_code', Class.course_code
+            )
+          ),
+          JSON_ARRAY()
+        ) as classes_json
       FROM Student
       LEFT JOIN StudentClass ON Student.student_id = StudentClass.student_id
+      LEFT JOIN Class ON StudentClass.class_id = Class.class_id
       ${whereSql}
       GROUP BY Student.student_id
-      ORDER BY Student.student_id DESC
+      ORDER BY ${sortColumn} ${order}
       LIMIT ? OFFSET ?
     `;
 
@@ -69,20 +84,34 @@ router.get("/students", async (req: Request, res: Response) => {
       ) AS t
     `;
 
-    // Execute list query (append limit/offset to params copy)
     const listParams = params.slice();
     listParams.push(limit, offset);
 
     const [rows] = await db.query<any[]>(listSql, listParams);
     const [countRows] = await db.query<any[]>(countSql, params);
 
-    // Convert student_id to string in response
-    const students = rows.map((r) => ({
-      student_id: String(r.student_id),
-      name: r.name,
-      email: r.email,
-      classes_enrolled: Number(r.classes_enrolled) || 0,
-    }));
+    const students = rows.map((r) => {
+      // Parse the JSON string from MySQL
+      let classes = r.classes_json;
+      if (typeof classes === 'string') {
+        try { classes = JSON.parse(classes); } catch(e) { classes = []; }
+      }
+      
+      // Filter out null entries (happens if a student has 0 classes due to LEFT JOIN)
+      if (Array.isArray(classes)) {
+        classes = classes.filter((c: any) => c && c.class_id);
+      } else {
+        classes = [];
+      }
+
+      return {
+        student_id: String(r.student_id),
+        name: r.name,
+        email: r.email,
+        classes_enrolled: Number(r.classes_count) || 0,
+        classes: classes // The frontend can now map this!
+      };
+    });
 
     const total = countRows[0]?.total ?? 0;
 

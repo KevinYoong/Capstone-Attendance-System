@@ -45,7 +45,7 @@ export default function AdminSidebar() {
 
   return (
     <div
-      className={`h-screen bg-[#0d1b2a] border-r border-white/10 transition-all duration-300 flex flex-col
+      className={`min-h-screen bg-[#0d1b2a] border-r border-white/10 transition-all duration-300 flex flex-col
         ${collapsed ? "w-20" : "w-64"}
       `}
     >
