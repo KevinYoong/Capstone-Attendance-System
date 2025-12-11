@@ -280,7 +280,7 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
         SELECT *
         FROM Session
         WHERE class_id = ?
-          AND DATE(started_at) = ?
+          AND scheduled_date = ?
         LIMIT 1
         `,
         [class_id, selectedDate]
@@ -352,77 +352,80 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
       [class_id]
     );
 
-    // 2) Check if there is an active session that hasn't expired (avoid duplicates)
-    const [semesterRows] = await conn.query(
-      `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
-    );
+    // 2) Get request parameters
+    const { online_mode, scheduled_date: requestedDate } = req.body;
+    const isOnlineMode: boolean = online_mode === true;
 
-    const semester = semesterRows[0];
+    const startedAt = new Date();
+    const expiresAt = new Date(startedAt.getTime() + 30 * 1000);
 
+    // Use scheduled_date from request if provided, otherwise compute from current date
+    let scheduled_date: string;
+    let weekNumber: number;
+
+    if (requestedDate) {
+      // Frontend provided the intended date
+      scheduled_date = requestedDate;
+
+      // Calculate week number from the scheduled date
+      const [semRows] = await db.query<SemesterRow[]>(
+        `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`
+      );
+      const semesterStart = new Date(semRows[0].start_date);
+      const scheduledDateObj = new Date(scheduled_date);
+      weekNumber = getAcademicWeek(semesterStart, scheduledDateObj);
+    } else {
+      // Fallback: compute from current date (for backward compatibility)
+      const [semRows] = await db.query<SemesterRow[]>(
+        `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`
+      );
+      const semesterStart = new Date(semRows[0].start_date);
+      weekNumber = getAcademicWeek(semesterStart, startedAt);
+
+      const [classRows] = await conn.query(
+        `SELECT day_of_week FROM Class WHERE class_id = ?`,
+        [class_id]
+      );
+      const cls = classRows[0];
+      const dayIndexMap = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 } as const;
+      const dayIndex = dayIndexMap[cls.day_of_week as keyof typeof dayIndexMap];
+
+      const scheduled = new Date(semesterStart);
+      scheduled.setDate(semesterStart.getDate() + (weekNumber - 1) * 7 + dayIndex);
+      scheduled_date = scheduled.toISOString().split("T")[0];
+    }
+
+    console.log(`📅 Creating session: scheduled_date=${scheduled_date}, week=${weekNumber}`);
+
+    // 3) Check if there's already an active session for this class on this date
     const [activeRows] = await conn.query(
       `SELECT session_id, started_at, expires_at, online_mode
       FROM Session
       WHERE class_id = ?
+        AND scheduled_date = ?
         AND is_expired = 0
         AND expires_at > NOW()
-        AND started_at BETWEEN ? AND ?
       ORDER BY started_at DESC LIMIT 1`,
-      [class_id, semester.start_date, semester.end_date]
+      [class_id, scheduled_date]
     );
 
     if (activeRows.length > 0) {
-      // There's an active session — return it instead of creating a new one
+      // There's an active session for this date — return it instead of creating a new one
       const active = activeRows[0];
       await conn.rollback();
       conn.release();
+      console.log(`⚠️  Active session already exists for ${scheduled_date}`);
       return res.status(200).json({
         message: "An active check-in already exists",
         session_id: active.session_id,
         started_at: active.started_at,
         expires_at: active.expires_at,
-        online_mode: active.online_mode === 1
+        online_mode: active.online_mode === 1,
+        scheduled_date: scheduled_date
       });
     }
 
-    // 3) Create new session
-    const startedAt = new Date();
-    console.log("🔥 SERVER TIME CHECK");
-    console.log("new Date() =", startedAt);
-    console.log("toISOString() =", startedAt.toISOString());
-    const expiresAt = new Date(startedAt.getTime() + 30 * 1000); 
-    // Load semester start date
-    const [semRows] = await db.query<SemesterRow[]>(
-      `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`
-    );
-    const semesterStart = new Date(semRows[0].start_date);
-    const weekNumber = getAcademicWeek(semesterStart, startedAt);
-    const [classRows] = await conn.query(
-      `SELECT day_of_week, start_time 
-      FROM Class 
-      WHERE class_id = ?`,
-      [class_id]
-    );
-
-    const cls = classRows[0];
-
-    const dayIndexMap = {
-      Monday: 0,
-      Tuesday: 1,
-      Wednesday: 2,
-      Thursday: 3,
-      Friday: 4,
-    } as const;
-
-    const dayIndex = dayIndexMap[cls.day_of_week as keyof typeof dayIndexMap];
-
-    // Compute scheduled date based on semesterStart + week number + class day
-    const scheduled = new Date(semesterStart);
-    scheduled.setDate(semesterStart.getDate() + (weekNumber - 1) * 7 + dayIndex);
-
-    const scheduled_date = scheduled.toISOString().split("T")[0];
-    const { online_mode } = req.body;
-    const isOnlineMode: boolean = online_mode === true;
-
+    // 4) Create new session
     const [result] = await conn.query(
       `INSERT INTO Session (class_id, started_at, scheduled_date, expires_at, online_mode, is_expired, week_number)
       VALUES (?, ?, ?, ?, ?, 0, ?)`,

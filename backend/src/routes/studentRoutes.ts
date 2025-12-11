@@ -215,6 +215,7 @@ router.get("/:student_id/active-sessions", async (req: Request, res: Response) =
       session_id: r.session_id,
       class_id: r.class_id,
       started_at: r.started_at,
+      scheduled_date: r.scheduled_date,
       expires_at: r.expires_at,
       online_mode: !!r.online_mode,
     }));

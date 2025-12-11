@@ -194,6 +194,7 @@ export default function LecturerClassDetail() {
     try {
     const res = await axios.post(`http://localhost:3001/lecturer/class/${class_id}/activate-checkin`, {
         online_mode: onlineMode,
+        scheduled_date: sessionDate  // Pass the intended date to backend
       });
 
     setSession({
