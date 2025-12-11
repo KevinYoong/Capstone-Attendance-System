@@ -38,11 +38,16 @@ io.on("connection", (socket) => {
 
   // Student joins all class rooms they belong to
   socket.on("joinStudentRooms", async (studentId: number) => {
+    console.log(`📥 [Socket] joinStudentRooms received for Student ${studentId}`);
     try {
       const [rows] = await db.query<any[]>(
         `SELECT class_id FROM StudentClass WHERE student_id = ?`,
         [studentId]
       );
+
+      if (rows.length === 0) {
+        console.warn(`⚠️ [Socket] Student ${studentId} has NO classes!`);
+      }
 
       rows.forEach((r) => {
         socket.join(`class_${r.class_id}`);

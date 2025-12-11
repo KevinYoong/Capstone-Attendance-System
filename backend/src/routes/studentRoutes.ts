@@ -213,11 +213,13 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
 router.get("/:student_id/active-sessions", async (req: Request, res: Response) => {
   const { student_id } = req.params;
 
+  console.log(`🔍 [API] Fetching active sessions for Student ID: ${student_id}`);
+
   try {
-    // Return sessions for student's classes where session is not expired
+    // 1. ADD `s.scheduled_date` TO THIS SELECT QUERY
     const [rows] = await db.query<any[]>(
       `
-      SELECT s.session_id, s.class_id, s.started_at, s.expires_at, s.online_mode
+      SELECT s.session_id, s.class_id, s.started_at, s.expires_at, s.online_mode, s.scheduled_date
       FROM Session s
       JOIN StudentClass sc ON sc.class_id = s.class_id
       WHERE sc.student_id = ?
@@ -228,14 +230,27 @@ router.get("/:student_id/active-sessions", async (req: Request, res: Response) =
       [student_id]
     );
 
-    // Normalize online_mode to boolean
-    const sessions = rows.map((r) => ({
-      session_id: r.session_id,
-      class_id: r.class_id,
-      started_at: r.started_at,
-      expires_at: r.expires_at,
-      online_mode: !!r.online_mode,
-    }));
+    console.log(`📊 [DB] Raw Active Sessions Found: ${rows.length}`, rows);
+
+    // 2. INCLUDE `scheduled_date` IN THE MAPPED RESPONSE
+    const sessions = rows.map((r) => {
+      // Debug date formatting
+      const rawDate = r.scheduled_date;
+      const formattedDate = rawDate 
+        ? new Date(rawDate).toLocaleDateString('en-CA')
+        : null;
+        
+      console.log(`🗓️ [Map] Session ${r.session_id}: Raw Date: ${rawDate} -> Formatted: ${formattedDate}`);
+
+      return {
+        session_id: r.session_id,
+        class_id: r.class_id,
+        started_at: r.started_at,
+        expires_at: r.expires_at,
+        online_mode: !!r.online_mode,
+        scheduled_date: formattedDate
+      };
+    });
 
     return res.json({ success: true, sessions });
   } catch (err) {

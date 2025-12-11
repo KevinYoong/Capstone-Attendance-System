@@ -369,7 +369,10 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     }
 
     const startedAt = new Date();
-    const expiresAt = new Date(startedAt.getTime() + 30 * 1000); 
+    const expiresAt = new Date(startedAt.getTime() + 5 * 60000); 
+
+    console.log("⏱️ [Activate] Server Time:", startedAt);
+    console.log("⏱️ [Activate] Expires At:", expiresAt);
 
     const [semRows] = await db.query<SemesterRow[]>(
       `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`
@@ -390,7 +393,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
     const scheduled = new Date(semesterStart);
     scheduled.setDate(semesterStart.getDate() + (weekNumber - 1) * 7 + dayIndex);
-    const scheduled_date = scheduled.toISOString().split("T")[0];
+    const scheduled_date = scheduled.toLocaleDateString('en-CA');
 
     const { online_mode } = req.body;
     const isOnlineMode: boolean = online_mode === true;
@@ -405,6 +408,8 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
     await conn.commit();
     conn.release();
+
+    console.log(`🚀 [Activate] Emitting Socket to room: class_${class_id}`);
 
     io.to(`class_${class_id}`).emit("checkinActivated", {
       class_id: Number(class_id),

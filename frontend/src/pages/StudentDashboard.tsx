@@ -208,6 +208,12 @@ export default function StudentDashboard() {
 
     // Socket listeners...
     socket.on("checkinActivated", (data: any) => {
+      console.log("🔔 EVENT RECEIVED:", data);
+      console.log("📅 DATE COMPARISON:", {
+        received: data.scheduled_date,
+        type: typeof data.scheduled_date
+      });
+
       const onlineMode = data.online_mode ?? data.onlineMode ?? false;
       setActiveSessions((prev) => ({
         ...prev,
