@@ -691,15 +691,17 @@ export default function StudentDashboard() {
                       </div>
                       <button
                         onClick={() => handleCheckIn(cls.class_id)}
-                        disabled={!isActive || isCheckedIn}
+                        disabled={!isActive || isCheckedIn || isMissed}
                         className={`mt-2 md:mt-0 px-4 py-2 rounded-lg transition
                           ${isCheckedIn
                             ? "bg-green-600 cursor-not-allowed text-white"
-                            : isActive
-                              ? "bg-yellow-500 hover:bg-yellow-400 text-black"
-                              : "bg-gray-600 cursor-not-allowed text-gray-300"}`}
+                            : isMissed
+                              ? "bg-red-600 cursor-not-allowed text-white"
+                              : isActive
+                                ? "bg-yellow-500 hover:bg-yellow-400 text-black"
+                                : "bg-gray-600 cursor-not-allowed text-gray-300"}`}
                       >
-                        {isCheckedIn ? "✓ Checked In" : isActive ? "Check In" : "Not Available"}
+                        {isCheckedIn ? "✓ Checked In" : isMissed ? "Missed Class" : isActive ? "Check In" : "Not Available"}
                       </button>
                        {isActive && activeSessions[cls.class_id]?.onlineMode && (
                           <span className="text-blue-400 font-semibold text-sm block mt-1">
