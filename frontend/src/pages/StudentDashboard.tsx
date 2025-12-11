@@ -652,7 +652,8 @@ export default function StudentDashboard() {
                   const targetDate = new Date(weekStartDate);
                   targetDate.setDate(weekStartDate.getDate() + classDayIndex);
 
-                  const targetDateStr = targetDate.toISOString().split("T")[0];
+                  // Use local date formatting (not UTC) to match backend's scheduled_date
+                  const targetDateStr = targetDate.toLocaleDateString("en-CA");
                   const activeDateStr = active.scheduled_date;
 
                   console.log("---- DATE MATCH CHECK ----");
