@@ -267,14 +267,16 @@ export default function StudentDashboard() {
       }));
     });
 
-    socket.on("studentCheckedIn", (data: any) => {
+    socket.on("studentCheckedIn", async (data: any) => {
       console.log("Student checked in:", data);
       if (data.student_id === user?.id) {
         setCheckedInClasses((prev) => new Set(prev).add(data.class_id));
+        // Refresh attendance data to get latest status from backend
+        await fetchAttendanceSemester();
       }
     });
 
-    socket.on("sessionExpired", (data: any) => {
+    socket.on("sessionExpired", async (data: any) => {
       console.log("🔴 Session expired:", data);
 
       // If student didn't check in, mark missed
@@ -292,6 +294,9 @@ export default function StudentDashboard() {
         delete copy[data.class_id];
         return copy;
       });
+
+      // Refresh attendance data to persist status after page refresh
+      await fetchAttendanceSemester();
     });
 
     return () => {
