@@ -106,10 +106,11 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
     // 2. Load ALL sessions in this semester that belong to classes the student is enrolled in
     const [sessionRows] = await db.query<any[]>(
       `
-      SELECT 
+      SELECT
         s.session_id,
         s.class_id,
         s.started_at,
+        s.scheduled_date,
         s.expires_at,
         s.online_mode,
         s.is_expired,
@@ -123,8 +124,8 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
       JOIN Class c ON c.class_id = s.class_id
       JOIN StudentClass sc ON sc.class_id = s.class_id AND sc.student_id = ?
 
-      LEFT JOIN Checkin ci 
-        ON ci.session_id = s.session_id 
+      LEFT JOIN Checkin ci
+        ON ci.session_id = s.session_id
        AND ci.student_id = ?
 
       WHERE s.started_at BETWEEN ? AND ?
@@ -147,6 +148,7 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
         class_name: s.class_name,
         course_code: s.course_code,
         started_at: s.started_at,
+        scheduled_date: s.scheduled_date,
         expires_at: s.expires_at,
         online_mode: s.online_mode,
         student_status: status
