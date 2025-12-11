@@ -93,13 +93,14 @@ export default function LecturerClassDetail() {
 
       setStudents(
         (res.data.students || []).map((s: any) => {
-          const isCheckedIn = checkinMap.has(s.student_id);
+          // Get the actual status from the checkin record (not just whether it exists)
+          const checkinStatus = checkinMap.get(s.student_id);
 
           let status: "checked-in" | "missed" | "pending" = "pending";
 
-          if (isCheckedIn) {
+          if (checkinStatus === "checked-in") {
             status = "checked-in";
-          } else if (rawSession?.is_expired) {
+          } else if (checkinStatus === "missed" || (rawSession?.is_expired && !checkinStatus)) {
             status = "missed";
           }
 
