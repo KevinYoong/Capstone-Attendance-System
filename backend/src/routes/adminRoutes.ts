@@ -729,25 +729,35 @@ function isValidClassType(ct: any): ct is ClassType {
 
 /**
  * GET /admin/classes
- * Optional: semester_id, q (search by class_name or course_code), page, limit
+ * - q: search by class_name or course_code
+ * - page, limit
+ * - sortBy: 'class_name' | 'course_code' | 'class_id'
+ * - order: 'asc' | 'desc'
  */
 router.get("/classes", async (req: Request, res: Response) => {
   try {
-    const semesterId = req.query.semester_id ? Number(req.query.semester_id) : undefined;
     const q = (req.query.q as string) || "";
     const page = Math.max(1, parseInt((req.query.page as string) || "1", 10));
     const limit = Math.max(1, parseInt((req.query.limit as string) || "50", 10));
     const offset = (page - 1) * limit;
 
+    // Sorting Params
+    const sortBy = (req.query.sortBy as string) || "class_id";
+    const order = (req.query.order as string) === "asc" ? "ASC" : "DESC";
+
+    const validSorts = ["class_name", "course_code", "class_id"];
+    const sortColumn = validSorts.includes(sortBy) ? `Class.${sortBy}` : "Class.class_id";
+
     const where: string[] = [];
     const params: any[] = [];
-    if (semesterId) { where.push("Class.semester_id = ?"); params.push(semesterId); }
+    
     if (q) {
       where.push("(Class.class_name LIKE ? OR Class.course_code LIKE ?)");
       params.push(`%${q}%`, `%${q}%`);
     }
     const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
+    // UPDATED SQL: Fetches enrolled students list via JSON aggregation
     const listSql = `
       SELECT
         Class.class_id,
@@ -762,17 +772,28 @@ router.get("/classes", async (req: Request, res: Response) => {
         Class.start_week,
         Class.end_week,
         Lecturer.name AS lecturer_name,
-        IFNULL(COUNT(StudentClass.student_id), 0) AS enrolled_count
+        COALESCE(
+          JSON_ARRAYAGG(
+            IF(Student.student_id IS NOT NULL,
+              JSON_OBJECT(
+                'student_id', Student.student_id,
+                'name', Student.name,
+                'email', Student.email
+              ),
+              NULL
+            )
+          ),
+          JSON_ARRAY()
+        ) as students_json
       FROM Class
       LEFT JOIN Lecturer ON Class.lecturer_id = Lecturer.lecturer_id
       LEFT JOIN StudentClass ON Class.class_id = StudentClass.class_id
+      LEFT JOIN Student ON StudentClass.student_id = Student.student_id
       ${whereSql}
       GROUP BY Class.class_id
-      ORDER BY Class.class_id DESC
+      ORDER BY ${sortColumn} ${order}
       LIMIT ? OFFSET ?
     `;
-    const listParams = params.slice();
-    listParams.push(limit, offset);
 
     const countSql = `
       SELECT COUNT(*) AS total FROM (
@@ -781,24 +802,41 @@ router.get("/classes", async (req: Request, res: Response) => {
       ) AS t
     `;
 
+    const listParams = params.slice();
+    listParams.push(limit, offset);
+
     const [rows] = await db.query<any[]>(listSql, listParams);
     const [countRows] = await db.query<any[]>(countSql, params);
 
-    const classes = rows.map(r => ({
-      class_id: Number(r.class_id),
-      class_name: r.class_name,
-      course_code: r.course_code,
-      day_of_week: r.day_of_week,
-      start_time: r.start_time,
-      end_time: r.end_time,
-      class_type: r.class_type,
-      lecturer_id: r.lecturer_id ? Number(r.lecturer_id) : null,
-      lecturer_name: r.lecturer_name || null,
-      semester_id: Number(r.semester_id),
-      start_week: Number(r.start_week),
-      end_week: Number(r.end_week),
-      enrolled_count: Number(r.enrolled_count) || 0,
-    }));
+    const classes = rows.map(r => {
+      // Parse JSON students list
+      let students = r.students_json;
+      if (typeof students === 'string') {
+        try { students = JSON.parse(students); } catch(e) { students = []; }
+      }
+      // Filter out nulls (from LEFT JOIN with no matches)
+      if (Array.isArray(students)) {
+        students = students.filter((s: any) => s && s.student_id);
+      } else {
+        students = [];
+      }
+
+      return {
+        class_id: Number(r.class_id),
+        class_name: r.class_name,
+        course_code: r.course_code,
+        day_of_week: r.day_of_week,
+        start_time: r.start_time,
+        end_time: r.end_time,
+        class_type: r.class_type,
+        lecturer_id: r.lecturer_id ? Number(r.lecturer_id) : null,
+        lecturer_name: r.lecturer_name || null,
+        semester_id: Number(r.semester_id),
+        start_week: Number(r.start_week),
+        end_week: Number(r.end_week),
+        students_enrolled: students, 
+      };
+    });
 
     const total = countRows[0]?.total ?? 0;
     res.json({ success: true, data: { classes, total, page, limit } });

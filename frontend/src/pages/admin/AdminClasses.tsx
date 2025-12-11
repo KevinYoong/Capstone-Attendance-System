@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import adminApi from "../../utils/adminApi";
 import {
   Edit,
@@ -9,6 +9,8 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
+  Search,
+  ArrowUpDown,
 } from "lucide-react";
 
 /* -----------------------------
@@ -39,13 +41,11 @@ interface ClassItem {
   start_week: number;
   end_week: number;
   class_type: "Lecture" | "Tutorial";
-  enrolled_count: number;
-
-  // frontend default (backend does not send student list)
+  // Updated: this comes populated from backend now
   students_enrolled: Student[];
 }
 
-const ROWS_PER_PAGE = 25;
+const ROWS_PER_PAGE = 10;
 
 /* -----------------------------
    MAIN COMPONENT
@@ -56,8 +56,15 @@ export default function AdminClasses() {
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [query, setQuery] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
+  // Pagination & Filtering (Server-Side)
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [totalItems, setTotalItems] = useState<number>(0);
+  const [query, setQuery] = useState(""); // Searches Class Name & Course Code
+
+  // Sorting
+  const [sortField, setSortField] = useState<string>("class_id");
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
+
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
   // Create / Edit / Assign / Delete modals
@@ -86,67 +93,78 @@ export default function AdminClasses() {
   const [assignSelected, setAssignSelected] = useState<Set<number>>(new Set());
 
   /* -----------------------------
-     Load Data from Backend
+     Load Data (Server Side for Classes)
   ----------------------------- */
   useEffect(() => {
-    async function loadAll() {
-      setLoading(true);
-      try {
-        const [cRes, lRes, sRes] = await Promise.all([
-          adminApi.get("/admin/classes"),
-          adminApi.get("/admin/lecturers"),
-          adminApi.get("/admin/students"),
-        ]);
+    async function fetchData() {
+        setLoading(true);
+        try {
+            // 1. Fetch Classes (Paginated/Sorted/Filtered)
+            const cRes = await adminApi.get("/admin/classes", {
+                params: {
+                    q: query,
+                    page: currentPage,
+                    limit: ROWS_PER_PAGE,
+                    sortBy: sortField,
+                    order: sortOrder
+                }
+            });
+            setClasses(cRes.data.data.classes || []);
+            setTotalItems(cRes.data.data.total || 0);
 
-        const classList = cRes.data?.data?.classes || [];
-        const lecturerList = lRes.data?.data?.lecturers || [];
-        const studentList = sRes.data?.data?.students || [];
+            // 2. Fetch full lists of lecturers & students ONCE (for modals)
+            // Optimization: In a real large app, you might only fetch these when opening the modal.
+            // For now, keeping your existing pattern but separating it from the table reload would be better
+            // IF we hadn't put it in the same useEffect.
+            // Let's optimize: Only fetch lecturers/students if lists are empty.
+            if (lecturers.length === 0) {
+               const lRes = await adminApi.get("/admin/lecturers");
+               setLecturers(lRes.data.data.lecturers || []);
+            }
+            if (students.length === 0) {
+               const sRes = await adminApi.get("/admin/students");
+               setStudents((sRes.data.data.students || []).map((s: any) => ({
+                   student_id: Number(s.student_id),
+                   name: s.name,
+                   email: s.email
+               })));
+            }
 
-        setClasses(
-          classList.map((c: any) => ({
-            ...c,
-            lecturer_name: c.lecturer_name ?? "",
-            students_enrolled: [], // backend does not return list → safe default
-          }))
-        );
-
-        setLecturers(lecturerList);
-        setStudents(
-          studentList.map((s: any) => ({
-            student_id: Number(s.student_id),
-            name: s.name,
-            email: s.email,
-          }))
-        );
-      } catch (err) {
-        console.error("Load error:", err);
-      } finally {
-        setLoading(false);
-      }
+        } catch (err) {
+            console.error("Load error:", err);
+        } finally {
+            setLoading(false);
+        }
     }
-
-    loadAll();
-  }, []);
+    const timeoutId = setTimeout(() => fetchData(), 300);
+    return () => clearTimeout(timeoutId);
+  }, [currentPage, query, sortField, sortOrder]); // Trigger on sort/page/search change
 
   /* -----------------------------
-     Filtering + Pagination
+     Sorting Helpers
   ----------------------------- */
-  const filtered = useMemo(() => {
-    const q = query.toLowerCase().trim();
-    if (!q) return classes;
+  const handleSort = (field: string) => {
+    if (sortField === field) {
+      setSortOrder(sortOrder === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortOrder("asc");
+    }
+    setCurrentPage(1);
+  };
 
-    return classes.filter((c) =>
-      [
-        c.class_name.toLowerCase(),
-        c.course_code.toLowerCase(),
-        (c.lecturer_name || "").toLowerCase(),
-      ].some((field) => field.includes(q))
+  const renderSortIcon = (field: string) => {
+    if (sortField !== field) {
+      return <ArrowUpDown size={14} className="text-gray-500 group-hover:text-blue-400" />;
+    }
+    return sortOrder === "asc" ? (
+      <ChevronUp size={14} className="text-blue-400" />
+    ) : (
+      <ChevronDown size={14} className="text-blue-400" />
     );
-  }, [classes, query]);
+  };
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
-  const pageStart = (currentPage - 1) * ROWS_PER_PAGE;
-  const pageClasses = filtered.slice(pageStart, pageStart + ROWS_PER_PAGE);
+  const totalPages = Math.max(1, Math.ceil(totalItems / ROWS_PER_PAGE));
 
   const toggleRow = (id: number) => {
     setExpandedRows((prev) => {
@@ -179,14 +197,15 @@ export default function AdminClasses() {
     try {
       const payload = { ...form, lecturer_id: Number(form.lecturer_id) };
       const res = await adminApi.post("/admin/classes", payload);
-
+      // Re-fetch to see new class respecting sort/page
+      // Alternatively, insert locally if on page 1. For simplicity, just reload or rely on useEffect logic if we reset state.
+      // Easiest is to just add to local state if sort is 'desc' and field is 'class_id'.
+      // Let's just rely on a re-fetch or a simple prepend.
       const created = {
         ...res.data.data,
-        lecturer_name:
-          lecturers.find((l) => l.lecturer_id === payload.lecturer_id)?.name ?? "",
+        lecturer_name: lecturers.find((l) => l.lecturer_id === payload.lecturer_id)?.name ?? "",
         students_enrolled: [],
       };
-
       setClasses((prev) => [created, ...prev]);
       setShowCreate(false);
     } catch (err) {
@@ -216,24 +235,20 @@ export default function AdminClasses() {
 
   const submitEdit = async () => {
     if (!selectedClass) return;
-
     try {
       const payload = { ...form, lecturer_id: Number(form.lecturer_id) };
       const res = await adminApi.put(`/admin/classes/${selectedClass.class_id}`, payload);
-
       setClasses((prev) =>
         prev.map((c) =>
           c.class_id === selectedClass.class_id
             ? {
                 ...res.data.data,
-                lecturer_name:
-                  lecturers.find((l) => l.lecturer_id === payload.lecturer_id)?.name ?? "",
+                lecturer_name: lecturers.find((l) => l.lecturer_id === payload.lecturer_id)?.name ?? "",
                 students_enrolled: c.students_enrolled,
               }
             : c
         )
       );
-
       setShowEdit(false);
     } catch (err) {
       console.error(err);
@@ -251,7 +266,6 @@ export default function AdminClasses() {
 
   const submitDelete = async () => {
     if (!selectedClass) return;
-
     try {
       await adminApi.delete(`/admin/classes/${selectedClass.class_id}`);
       setClasses((prev) => prev.filter((c) => c.class_id !== selectedClass.class_id));
@@ -284,16 +298,12 @@ export default function AdminClasses() {
 
   const submitAssign = async () => {
     if (!selectedClass) return;
-
     const ids = [...assignSelected];
-
     try {
       await adminApi.post(`/admin/classes/${selectedClass.class_id}/students`, {
         student_ids: ids,
       });
-
       const addedStudents = students.filter((s) => ids.includes(s.student_id));
-
       setClasses((prev) =>
         prev.map((c) =>
           c.class_id === selectedClass.class_id
@@ -309,7 +319,6 @@ export default function AdminClasses() {
             : c
         )
       );
-
       setShowAssign(false);
     } catch (err) {
       console.error(err);
@@ -323,133 +332,171 @@ export default function AdminClasses() {
   return (
     <div className="p-8 text-white">
       {/* Header */}
-      <div className="flex justify-between items-center mb-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
         <h1 className="text-3xl font-bold">Admin — Classes</h1>
 
-        <div className="flex items-center gap-3">
-          <input
-            placeholder="Search classes..."
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setCurrentPage(1);
-            }}
-            className="px-4 py-2 rounded-lg bg-[#101010] border border-white/10 w-[300px]"
-          />
+        <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
+            <input 
+              type="text"
+              placeholder="Search by name or code..."
+              className="pl-10 pr-4 py-2 bg-[#101010] border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500 w-full sm:w-64 transition"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setCurrentPage(1);
+              }}
+            />
+          </div>
 
           <button
             onClick={openCreate}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500"
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 transition"
           >
             <Plus size={16} />
-            Create Class
+            <span className="hidden sm:inline">Create Class</span>
           </button>
         </div>
       </div>
 
       {/* Table */}
       <div className="bg-[#181818]/70 rounded-xl border border-white/10 overflow-hidden mb-6">
-        <table className="w-full text-left">
-          <thead className="bg-[#1f1f2f] text-gray-300">
-            <tr>
-              <th className="p-4">Class Name</th>
-              <th className="p-4">Course Code</th>
-              <th className="p-4">Lecturer</th>
-              <th className="p-4">Day & Time</th>
-              <th className="p-4">Weeks</th>
-              <th className="p-4">Students</th>
-              <th className="p-4 text-right">Actions</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {loading ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-gray-300">
+            <thead className="bg-[#1f1f2f] text-gray-300">
               <tr>
-                <td colSpan={7} className="p-6 text-center text-gray-400">
-                  Loading...
-                </td>
+                {/* Sortable Class Name */}
+                <th 
+                  className="p-4 cursor-pointer hover:bg-white/5 transition group whitespace-nowrap"
+                  onClick={() => handleSort("class_name")}
+                >
+                  <div className="flex items-center gap-2">
+                    Class Name
+                    {renderSortIcon("class_name")}
+                  </div>
+                </th>
+
+                {/* Sortable Course Code */}
+                <th 
+                  className="p-4 cursor-pointer hover:bg-white/5 transition group whitespace-nowrap"
+                  onClick={() => handleSort("course_code")}
+                >
+                  <div className="flex items-center gap-2">
+                    Course Code
+                    {renderSortIcon("course_code")}
+                  </div>
+                </th>
+
+                <th className="p-4 whitespace-nowrap">Lecturer</th>
+                <th className="p-4 whitespace-nowrap">Day & Time</th>
+                <th className="p-4 whitespace-nowrap text-center">Weeks</th>
+                <th className="p-4 whitespace-nowrap text-center">Students</th>
+                <th className="p-4 whitespace-nowrap text-center">Actions</th>
               </tr>
-            ) : pageClasses.length === 0 ? (
-              <tr>
-                <td colSpan={7} className="p-6 text-center text-gray-400">
-                  No classes found.
-                </td>
-              </tr>
-            ) : (
-              pageClasses.map((cls) => {
-                const isExpanded = expandedRows.has(cls.class_id);
+            </thead>
 
-                return (
-                  <tbody key={cls.class_id}>
-                    <tr className="border-t border-white/5 hover:bg-[#222233]">
-                      <td className="p-4">{cls.class_name}</td>
-                      <td className="p-4">{cls.course_code}</td>
+            <tbody>
+              {loading ? (
+                <tr><td colSpan={7} className="p-6 text-center text-gray-400">Loading...</td></tr>
+              ) : classes.length === 0 ? (
+                <tr><td colSpan={7} className="p-6 text-center text-gray-400">No classes found.</td></tr>
+              ) : (
+                classes.map((cls) => {
+                  const isExpanded = expandedRows.has(cls.class_id);
 
-                      <td className="p-4">
-                        {cls.lecturer_name || "—"}
-                      </td>
+                  return (
+                    // React.Fragment fixes the nesting layout issue
+                    <React.Fragment key={cls.class_id}>
+                      <tr className="border-t border-white/5 hover:bg-[#222233] transition-colors">
+                        <td className="p-4 font-medium text-white">{cls.class_name}</td>
+                        <td className="p-4">{cls.course_code}</td>
 
-                      <td className="p-4">
-                        {cls.day_of_week}
-                        <br />
-                        <span className="text-gray-400 text-sm">
-                          {cls.start_time}–{cls.end_time}
-                        </span>
-                      </td>
+                        <td className="p-4">
+                          {cls.lecturer_name || "—"}
+                        </td>
 
-                      <td className="p-4">
-                        Week {cls.start_week}–{cls.end_week}
-                      </td>
+                        <td className="p-4">
+                          {cls.day_of_week}
+                          <br />
+                          <span className="text-gray-400 text-sm">
+                            {cls.start_time}–{cls.end_time}
+                          </span>
+                        </td>
 
-                      <td className="p-4">
-                        <button
-                          onClick={() => toggleRow(cls.class_id)}
-                          className="flex items-center gap-2 text-sm text-gray-300 hover:text-white"
-                        >
-                          {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                          <span>{cls.students_enrolled.length} students</span>
-                        </button>
-                      </td>
+                        <td className="p-4 text-center">
+                          Week {cls.start_week}–{cls.end_week}
+                        </td>
 
-                      <td className="p-4 text-right flex justify-end gap-3">
+                        <td className="p-4 text-center">
+                          <button
+                            onClick={() => toggleRow(cls.class_id)}
+                            className="flex items-center gap-2 text-sm text-gray-300 hover:text-white transition"
+                          >
+                            {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                            <span>{cls.students_enrolled.length} students</span>
+                          </button>
+                        </td>
 
-                        <button onClick={() => openEdit(cls)} className="text-yellow-400 hover:text-yellow-300">
-                          <Edit size={16} />
-                        </button>
+                        <td className="p-4 text-right flex justify-center gap-3">
+                          
+                          {/* Edit Button with Tooltip */}
+                          <div className="relative group">
+                            <button onClick={() => openEdit(cls)} className="text-yellow-400 hover:text-yellow-300 transition">
+                              <Edit size={16} />
+                            </button>
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Edit</div>
+                          </div>
 
-                        <button onClick={() => openAssign(cls)} className="text-blue-400 hover:text-blue-300">
-                          <Users size={16} />
-                        </button>
+                          {/* Assign Button with Tooltip */}
+                          <div className="relative group">
+                            <button onClick={() => openAssign(cls)} className="text-blue-400 hover:text-blue-300 transition">
+                              <Users size={16} />
+                            </button>
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Assign</div>
+                          </div>
 
-                        <button onClick={() => openDelete(cls)} className="text-red-400 hover:text-red-300">
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
+                          {/* Delete Button with Tooltip */}
+                          <div className="relative group">
+                            <button onClick={() => openDelete(cls)} className="text-red-400 hover:text-red-300 transition">
+                              <Trash2 size={16} />
+                            </button>
+                            <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Delete</div>
+                          </div>
 
-                    {isExpanded && (
-                      <tr className="bg-[#15151b] border-t border-white/5">
-                        <td colSpan={7} className="p-4">
-                          {cls.students_enrolled.length === 0 ? (
-                            <div className="text-gray-400 italic">No students enrolled.</div>
-                          ) : (
-                            <ul className="space-y-1">
-                              {cls.students_enrolled.map((s) => (
-                                <li key={s.student_id} className="text-gray-200">
-                                  • {s.name} ({s.student_id})
-                                </li>
-                              ))}
-                            </ul>
-                          )}
                         </td>
                       </tr>
-                    )}
-                  </tbody>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+
+                      {/* Expanded Student List */}
+                      {isExpanded && (
+                        <tr className="bg-[#15151b] border-t border-white/5 animate-in fade-in slide-in-from-top-2 duration-200">
+                          <td colSpan={7} className="p-4">
+                            <div className="pl-6">
+                                <h4 className="text-sm uppercase text-gray-500 font-bold mb-2">Enrolled Students</h4>
+                                {cls.students_enrolled.length === 0 ? (
+                                  <div className="text-gray-400 italic text-sm">No students enrolled.</div>
+                                ) : (
+                                  <ul className="space-y-1 text-gray-300 text-md">
+                                    {cls.students_enrolled.map((s) => (
+                                      <li key={s.student_id} className="flex items-center gap-2">
+                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
+                                        {s.name} <span className="text-gray-500">({s.student_id})</span>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Pagination */}
@@ -457,80 +504,55 @@ export default function AdminClasses() {
         <button
           disabled={currentPage === 1}
           onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-          className="p-2 disabled:opacity-30"
+          className="p-2 rounded-lg hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition"
         >
           <ChevronLeft />
         </button>
 
-        <p>
-          Page <span className="font-semibold">{currentPage}</span> of {totalPages}
+        <p className="text-gray-300">
+          Page <span className="font-bold text-white">{currentPage}</span> of {totalPages}
         </p>
 
         <button
           disabled={currentPage === totalPages}
           onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-          className="p-2 disabled:opacity-30"
+          className="p-2 rounded-lg hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition"
         >
           <ChevronRight />
         </button>
       </div>
 
-      {/* ---------- CREATE MODAL ---------- */}
+      {/* ---------- CREATE MODAL (Unchanged) ---------- */}
       {showCreate && (
         <ModalShell title="Create Class" onClose={() => setShowCreate(false)}>
           <ClassForm form={form} setForm={setForm} lecturers={lecturers} />
-          <FormActions
-            onCancel={() => setShowCreate(false)}
-            onSubmit={submitCreate}
-            submitText="Create"
-          />
+          <FormActions onCancel={() => setShowCreate(false)} onSubmit={submitCreate} submitText="Create" />
         </ModalShell>
       )}
 
-      {/* ---------- EDIT MODAL ---------- */}
+      {/* ---------- EDIT MODAL (Unchanged) ---------- */}
       {showEdit && selectedClass && (
         <ModalShell title="Edit Class" onClose={() => setShowEdit(false)}>
           <ClassForm form={form} setForm={setForm} lecturers={lecturers} />
-          <FormActions
-            onCancel={() => setShowEdit(false)}
-            onSubmit={submitEdit}
-            submitText="Save"
-          />
+          <FormActions onCancel={() => setShowEdit(false)} onSubmit={submitEdit} submitText="Save" />
         </ModalShell>
       )}
 
-      {/* ---------- ASSIGN MODAL ---------- */}
+      {/* ---------- ASSIGN MODAL (Unchanged) ---------- */}
       {showAssign && selectedClass && (
         <ModalShell title={`Assign Students — ${selectedClass.class_name}`} onClose={() => setShowAssign(false)}>
-          <AssignStudents
-            assignSearch={assignSearch}
-            setAssignSearch={setAssignSearch}
-            filteredStudents={filteredStudents}
-            assignSelected={assignSelected}
-            setAssignSelected={setAssignSelected}
-          />
-          <FormActions
-            onCancel={() => setShowAssign(false)}
-            onSubmit={submitAssign}
-            submitText="Assign"
-          />
+          <AssignStudents assignSearch={assignSearch} setAssignSearch={setAssignSearch} filteredStudents={filteredStudents} assignSelected={assignSelected} setAssignSelected={setAssignSelected} />
+          <FormActions onCancel={() => setShowAssign(false)} onSubmit={submitAssign} submitText="Assign" />
         </ModalShell>
       )}
 
-      {/* ---------- DELETE MODAL ---------- */}
+      {/* ---------- DELETE MODAL (Unchanged) ---------- */}
       {showDelete && selectedClass && (
         <ModalShell title="Delete Class" onClose={() => setShowDelete(false)}>
           <p className="text-gray-300 mb-4">
-            Are you sure you want to delete <b>{selectedClass.class_name}</b>?
-            <br />
-            This will remove all enrolled students.
+            Are you sure you want to delete <b>{selectedClass.class_name}</b>?<br />This will remove all enrolled students.
           </p>
-          <FormActions
-            onCancel={() => setShowDelete(false)}
-            onSubmit={submitDelete}
-            submitText="Delete"
-            danger
-          />
+          <FormActions onCancel={() => setShowDelete(false)} onSubmit={submitDelete} submitText="Delete" danger />
         </ModalShell>
       )}
     </div>
