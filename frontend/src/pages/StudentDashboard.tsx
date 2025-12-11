@@ -628,9 +628,9 @@ export default function StudentDashboard() {
                       new Date(s.started_at) <= end
                   );
 
-                  // Determine status
-                  const isCheckedIn = sessionForThisWeek?.student_status === "present";
-                  const isMissed = sessionForThisWeek?.student_status === "missed";
+                  // Determine status - check BOTH backend data AND real-time local state
+                  const isCheckedIn = sessionForThisWeek?.student_status === "present" || checkedInClasses.has(cls.class_id);
+                  const isMissed = sessionForThisWeek?.student_status === "missed" || missedSessions.has(cls.class_id);
 
                   // --- FIX: Only activate if session date matches THIS week's date ---
                   let isActive = false;
