@@ -185,7 +185,7 @@ app.post("/login", async (req: Request, res: Response) => {
       const token = jwt.sign(
         { id: (user as Admin).admin_id, role: "admin" },
         process.env.JWT_SECRET as string,
-        { expiresIn: process.env.JWT_EXPIRES_IN || "1d" }
+        { expiresIn: process.env.JWT_EXPIRES_IN || "1d" } as jwt.SignOptions
       );
 
       return res.status(200).json({
