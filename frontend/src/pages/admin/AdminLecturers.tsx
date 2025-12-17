@@ -178,10 +178,13 @@ export default function AdminLecturers() {
     setShowResetPasswordModal(true);
   };
 
+  // 🛠️ FIXED: Updated endpoint to match backend route
   const handleResetPassword = async () => {
     if (!selectedLecturer) return;
     try {
-      await adminApi.put(`/admin/lecturers/${selectedLecturer.lecturer_id}/password`, {
+      // Changed from .put to .post
+      // Changed URL from .../password to .../reset-password
+      await adminApi.post(`/admin/lecturers/${selectedLecturer.lecturer_id}/reset-password`, {
         password: formPassword,
       });
       alert("Password reset successfully");
