@@ -64,6 +64,9 @@ export default function StudentDashboard() {
   });
   const [openDays, setOpenDays] = useState<string[]>([]);
 
+  // Track which class is currently processing a check-in (loading state)
+  const [checkingInClassId, setCheckingInClassId] = useState<number | null>(null);
+
   const [activeSessions, setActiveSessions] = useState<Record<number, {
     session_id: number;
     startedAt: string;
@@ -134,7 +137,7 @@ export default function StudentDashboard() {
           startedAt: new Date(s.started_at).toISOString(),
           expiresAt: new Date(s.expires_at).toISOString(),
           onlineMode: !!s.online_mode,
-          scheduled_date: s.scheduled_date, // Ensure backend sends this, or derive it
+          scheduled_date: s.scheduled_date, 
         };
       });
 
@@ -208,12 +211,6 @@ export default function StudentDashboard() {
 
     // Socket listeners...
     socket.on("checkinActivated", (data: any) => {
-      console.log("🔔 EVENT RECEIVED:", data);
-      console.log("📅 DATE COMPARISON:", {
-        received: data.scheduled_date,
-        type: typeof data.scheduled_date
-      });
-
       const onlineMode = data.online_mode ?? data.onlineMode ?? false;
       setActiveSessions((prev) => ({
         ...prev,
@@ -227,7 +224,6 @@ export default function StudentDashboard() {
       }));
     });
 
-    // FIX: Update the specific session in attendanceSessions array instead of a generic Set
     socket.on("studentCheckedIn", (data: any) => {
       if (data.student_id === user?.id) {
         setAttendanceSessions(prev => prev.map(session => {
@@ -237,26 +233,21 @@ export default function StudentDashboard() {
             return session;
         }));
         
-        // Also update the summary count locally for immediate UI feedback
         setAttendanceSummaryByClass(prev => {
             const cls = prev[data.class_id];
             if (!cls) return prev;
-            // Recalculate rudimentary stats if needed, or just let next fetch handle it
-            // For now, let's just trust the next page refresh for deep stats to avoid complexity
             return prev; 
         });
       }
     });
 
     socket.on("sessionExpired", (data: any) => {
-      // Remove from active
       setActiveSessions((prev) => {
         const copy = { ...prev };
         delete copy[data.class_id];
         return copy;
       });
 
-      // Update history status to missed if not checked in
       setAttendanceSessions(prev => prev.map(session => {
           if (session.class_id === data.class_id && session.session_id === data.session_id) {
              if (session.student_status !== 'present' && session.student_status !== 'checked-in') {
@@ -342,7 +333,6 @@ export default function StudentDashboard() {
     if (!semester) return null;
     const dayIndex = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 }[dayName] ?? 0;
     const semesterStart = new Date(semester.start_date);
-    // Add weeks offset + day offset
     const targetDate = new Date(semesterStart);
     targetDate.setDate(semesterStart.getDate() + (selectedWeek - 1) * 7 + dayIndex);
     return targetDate;
@@ -356,14 +346,21 @@ export default function StudentDashboard() {
   const handleCheckIn = async (classId: number) => {
     if (!user) return;
 
+    // Prevent checking in if already in progress for ANY class
+    if (checkingInClassId !== null) return;
+
     const session = activeSessions[classId];
     if (!session) {
       alert("No active session for this class");
       return;
     }
 
+    // 1. Set Loading State
+    setCheckingInClassId(classId);
+
     if (!navigator.geolocation) {
       alert("❌ Geolocation is not supported by your browser");
+      setCheckingInClassId(null);
       return;
     }
 
@@ -391,7 +388,7 @@ export default function StudentDashboard() {
                      class_id: classId,
                      started_at: session.startedAt, 
                      student_status: 'present',
-                     scheduled_date: session.scheduled_date // <--- Pass this from activeSessions!
+                     scheduled_date: session.scheduled_date 
                  }];
              });
             alert("✅ Check-in successful!");
@@ -399,11 +396,16 @@ export default function StudentDashboard() {
         } catch (error: any) {
           const errorMessage = error.response?.data?.message || "Check-in failed";
           alert(`❌ ${errorMessage}`);
+        } finally {
+          // 2. Reset Loading State (Success or Fail)
+          setCheckingInClassId(null);
         }
       },
       (error) => {
         alert("❌ Unable to retrieve location. Please allow location access.");
         console.error("Geolocation error:", error);
+        // 2. Reset Loading State (Geo Fail)
+        setCheckingInClassId(null);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
@@ -412,7 +414,6 @@ export default function StudentDashboard() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0a0f1f] via-[#0d1b2a] to-[#051923] text-white p-8">
       <div className="max-w-4xl mx-auto">
-        {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">Student Dashboard</h1>
           <div className="flex items-center gap-4">
@@ -431,7 +432,6 @@ export default function StudentDashboard() {
           </div>
         </div>
 
-        {/* Welcome Card */}
         <div className="bg-[#181818]/80 backdrop-blur-xl p-6 rounded-2xl border border-white/10 mb-6">
           <h2 className="text-xl mb-2">Welcome, {user?.name}!</h2>
           <p className="text-gray-400">Student ID: {user?.id}</p>
@@ -444,7 +444,7 @@ export default function StudentDashboard() {
           </div>
         ) : semester ? (
           <div className="bg-gradient-to-r from-[#1a1a2e] via-[#16213e] to-[#1a1a2e] backdrop-blur-xl p-6 rounded-2xl border border-blue-500/20 mb-6 shadow-lg">
-            <div className="flex flex-col md:flex-row justify-between items-center gap-4">
+             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
               <div>
                 <h2 className="text-2xl font-bold text-blue-400 mb-1">{semester.name}</h2>
                 <p className="text-gray-300">
@@ -521,36 +521,23 @@ export default function StudentDashboard() {
                   <p className="text-gray-400 px-4 py-4 text-center">No classes today.</p>
                 ) : (
                   classes.map((cls, idx) => {
-                    // ------------------------------------------------------------------
-                    // 🔍 FIXED LOGIC: Strict Date Matching + No Global Sets
-                    // ------------------------------------------------------------------
-                    
-                    // 1. Calculate the Target Date (YYYY-MM-DD)
                     const rowDateObj = getDateObjForDay(day);
-                    // Use 'en-CA' to get YYYY-MM-DD format which matches your backend
                     const rowIsoDate = rowDateObj ? rowDateObj.toLocaleDateString('en-CA') : "";
 
-                    // 2. Find session by Matching SCHEDULED DATE (Reliable) instead of started_at
                     const sessionForThisWeek = attendanceSessions.find((s) => {
                         if (s.class_id !== cls.class_id) return false;
-                        
-                        // PRIMARY MATCH: Use the robust scheduled_date from DB/State
                         if (s.scheduled_date) {
                             return s.scheduled_date === rowIsoDate;
                         }
-                        
-                        // FALLBACK: If scheduled_date is missing (old data), try calculating from started_at
                         const sDate = new Date(s.started_at).toLocaleDateString('en-CA');
                         return sDate === rowIsoDate;
                     });
 
-                    // Determine Status based ONLY on this specific session entry
                     const isCheckedIn = sessionForThisWeek?.student_status === "present" || 
                                         sessionForThisWeek?.student_status === "checked-in";
 
                     const isMissed = sessionForThisWeek?.student_status === "missed";
 
-                    // Check for Active Session
                     let isActive = false;
                     const active = activeSessions[cls.class_id];
                     
@@ -562,6 +549,9 @@ export default function StudentDashboard() {
                     }
 
                     const analytics = attendanceSummaryByClass[cls.class_id];
+
+                    // Check if THIS class is the one currently checking in
+                    const isProcessing = checkingInClassId === cls.class_id;
 
                     return (
                       <div
@@ -615,17 +605,26 @@ export default function StudentDashboard() {
 
                         <button
                           onClick={() => handleCheckIn(cls.class_id)}
-                          disabled={!isActive || isCheckedIn || isMissed}
+                          // DISABLE if processing this class, OR if processing ANY class (optional), OR valid states
+                          disabled={!isActive || isCheckedIn || isMissed || isProcessing || checkingInClassId !== null}
                           className={`w-full md:w-auto px-6 py-2 rounded-lg transition font-medium shadow-lg
                             ${isCheckedIn
                               ? "bg-green-900/50 text-green-200 cursor-not-allowed border border-green-700/50"
                               : isMissed
                                 ? "bg-red-900/50 text-red-200 cursor-not-allowed border border-red-700/50"
                                 : isActive
-                                  ? "bg-yellow-500 hover:bg-yellow-400 text-black shadow-yellow-500/20"
+                                  ? isProcessing
+                                    ? "bg-yellow-600 text-yellow-200 cursor-wait shadow-none"
+                                    : "bg-yellow-500 hover:bg-yellow-400 text-black shadow-yellow-500/20"
                                   : "bg-gray-800 text-gray-500 cursor-not-allowed border border-gray-700"}`}
                         >
-                          {isCheckedIn ? "Completed" : isMissed ? "Absent" : isActive ? "Check In Now" : "Not Available"}
+                          {isCheckedIn 
+                            ? "Completed" 
+                            : isMissed 
+                              ? "Absent" 
+                              : isActive 
+                                ? (isProcessing ? "Verifying..." : "Check In Now") 
+                                : "Not Available"}
                         </button>
                       </div>
                     );
