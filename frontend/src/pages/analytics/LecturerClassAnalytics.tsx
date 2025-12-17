@@ -42,6 +42,29 @@ export default function LecturerClassAnalytics() {
   const students = data.students;
   const sessions = data.sessions;
 
+  // Assign a numeric score to each status (Lower number = Higher Priority)
+  const getStatusPriority = (status: string) => {
+    switch (status) {
+      case "critical": return 1; // Highest priority
+      case "warning": return 2;  // Medium priority
+      case "good": return 3;     // Lowest priority
+      default: return 4;         // Fallback
+    }
+  };
+
+  const sortedStudents = [...data.students].sort((a: any, b: any) => {
+    const priorityA = getStatusPriority(a.attendance_status);
+    const priorityB = getStatusPriority(b.attendance_status);
+
+    // Primary Sort: Compare Status Priority
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+
+    // Secondary Sort: Alphabetical by Name
+    return a.name.localeCompare(b.name);
+  });
+
   return (
     <div className="min-h-screen text-white bg-[#0a0f1f] p-8">
       <button
@@ -103,7 +126,8 @@ export default function LecturerClassAnalytics() {
       <h2 className="text-2xl font-semibold mb-3">Student Attendance</h2>
 
       <div className="space-y-4">
-        {students.map((st: any) => {
+        {sortedStudents.map((st: any) => {
+          // Determine text color based on status
           const color =
             st.attendance_status === "good"
               ? "text-green-400"
@@ -111,16 +135,40 @@ export default function LecturerClassAnalytics() {
               ? "text-yellow-400"
               : "text-red-400";
 
+          // Determine border color highlights
+          const borderClass = 
+            st.attendance_status === "critical" ? "border-red-500/50" :
+            st.attendance_status === "warning" ? "border-yellow-500/50" :
+            "border-white/10";
+
           return (
             <div
               key={st.student_id}
-              className="bg-[#1d1d2b] border border-white/10 p-4 rounded-xl"
+              className={`bg-[#1d1d2b] border ${borderClass} p-4 rounded-xl`}
             >
-              <p className="font-semibold">{st.name}</p>
-              <p className="text-gray-300 text-sm">{st.email}</p>
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="font-semibold">{st.name}</p>
+                  <p className="text-gray-300 text-sm">{st.email}</p>
+                </div>
+                
+                {/* Status Badges */}
+                {st.attendance_status === "critical" && (
+                  <span className="bg-red-900/50 text-red-200 text-xs px-2 py-1 rounded border border-red-500/30">
+                    CRITICAL
+                  </span>
+                )}
+                {st.attendance_status === "warning" && (
+                  <span className="bg-yellow-900/50 text-yellow-200 text-xs px-2 py-1 rounded border border-yellow-500/30">
+                    WARNING
+                  </span>
+                )}
+              </div>
 
-              <p className="mt-1">Present: {st.present_count}</p>
-              <p>Missed: {st.missed_count}</p>
+              <div className="mt-2 flex gap-4 text-sm">
+                <p>Present: {st.present_count}</p>
+                <p>Missed: {st.missed_count}</p>
+              </div>
 
               <p className={`font-bold mt-1 ${color}`}>
                 {st.attendance_rate}% — {st.attendance_status.toUpperCase()}
