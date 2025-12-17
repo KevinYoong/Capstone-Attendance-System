@@ -1294,4 +1294,66 @@ router.patch("/semesters/:id/activate", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /admin/students/:student_id/classes
+ * Enroll a specific student into a specific class
+ */
+router.post("/students/:student_id/classes", async (req: Request, res: Response) => {
+  try {
+    const { student_id } = req.params;
+    const { class_id } = req.body;
+
+    if (!class_id) {
+      return res.status(400).json({ success: false, message: "Class ID is required" });
+    }
+
+    // Check if already enrolled
+    const [existing] = await db.query<any[]>(
+      "SELECT * FROM StudentClass WHERE student_id = ? AND class_id = ?",
+      [student_id, class_id]
+    );
+
+    if (existing.length > 0) {
+      return res.status(400).json({ success: false, message: "Student is already enrolled in this class" });
+    }
+
+    await db.query(
+      "INSERT INTO StudentClass (student_id, class_id) VALUES (?, ?)",
+      [student_id, class_id]
+    );
+
+    // Fetch class details to return to frontend for immediate UI update
+    const [rows] = await db.query<any[]>(
+      "SELECT class_id, class_name, course_code FROM Class WHERE class_id = ?",
+      [class_id]
+    );
+    const classInfo = rows[0];
+
+    res.json({ success: true, data: classInfo });
+  } catch (err) {
+    console.error("Enroll error:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+/**
+ * DELETE /admin/students/:student_id/classes/:class_id
+ * Drop a student from a specific class
+ */
+router.delete("/students/:student_id/classes/:class_id", async (req: Request, res: Response) => {
+  try {
+    const { student_id, class_id } = req.params;
+
+    await db.query(
+      `DELETE FROM StudentClass WHERE student_id = ? AND class_id = ?`,
+      [student_id, class_id]
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("DELETE /admin/students/:sid/classes/:cid:", err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
 export default router;
