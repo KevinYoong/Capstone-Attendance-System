@@ -44,53 +44,44 @@ export default function AdminStudents() {
   // Modals
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [formData, setFormData] = useState({
+
+  // Forms
+  const [form, setForm] = useState({
     student_id: "",
     name: "",
     email: "",
     password: "",
   });
 
+  // Fetch
   useEffect(() => {
     async function fetchData() {
-        setLoading(true);
-        try {
-          const res = await adminApi.get("/admin/students", {
-            params: {
-              q: query,
-              page: currentPage,
-              limit: ROWS_PER_PAGE,
-              sortBy: sortField,
-              order: sortOrder
-            }
-          });
-          setStudents(res.data.data.students);
-          setTotalItems(res.data.data.total);
-        } catch (err) {
-          console.error("Error fetching students:", err);
-          setStudents([]); 
-        } finally {
-          setLoading(false);
-        }
+      setLoading(true);
+      try {
+        const res = await adminApi.get("/admin/students", {
+          params: {
+            q: query,
+            page: currentPage,
+            limit: ROWS_PER_PAGE,
+            sortBy: sortField,
+            order: sortOrder,
+          },
+        });
+        setStudents(res.data.data.students || []);
+        setTotalItems(res.data.data.total || 0);
+      } catch (err) {
+        console.error("Fetch error:", err);
+      } finally {
+        setLoading(false);
+      }
     }
-    const timeoutId = setTimeout(() => fetchData(), 300);
-    return () => clearTimeout(timeoutId);
+    const timer = setTimeout(() => fetchData(), 300);
+    return () => clearTimeout(timer);
   }, [currentPage, query, sortField, sortOrder]);
-
-  // Dynamic Sort Icon Helper
-  const renderSortIcon = (field: string) => {
-    if (sortField !== field) {
-      return <ArrowUpDown size={14} className="text-gray-500 group-hover:text-blue-400" />;
-    }
-    return sortOrder === "asc" ? (
-      <ChevronUp size={14} className="text-blue-400" />
-    ) : (
-      <ChevronDown size={14} className="text-blue-400" />
-    );
-  };
 
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -100,6 +91,17 @@ export default function AdminStudents() {
       setSortOrder("asc");
     }
     setCurrentPage(1);
+  };
+
+  const renderSortIcon = (field: string) => {
+    if (sortField !== field) {
+      return <ArrowUpDown size={14} className="text-gray-500 group-hover:text-blue-400" />;
+    }
+    return sortOrder === "asc" ? (
+      <ChevronUp size={14} className="text-blue-400" />
+    ) : (
+      <ChevronDown size={14} className="text-blue-400" />
+    );
   };
 
   const totalPages = Math.max(1, Math.ceil(totalItems / ROWS_PER_PAGE));
@@ -112,95 +114,116 @@ export default function AdminStudents() {
     });
   };
 
-  // ---------- CRUD Handlers ----------
-  const handleCreateStudent = async () => {
+  // Handlers
+  const openCreate = () => {
+    setSelectedStudent(null);
+    setForm({ student_id: "", name: "", email: "", password: "" });
+    setShowCreateModal(true);
+  };
+
+  const submitCreate = async () => {
     try {
-      const payload = {
-        student_id: formData.student_id,
-        name: formData.name,
-        email: formData.email,
-        password: formData.password,
-      };
-
-      const res = await adminApi.post("/admin/students", payload);
-      setStudents((prev) => [res.data.data, ...prev]);
-
+      await adminApi.post("/admin/students", {
+        student_id: form.student_id,
+        name: form.name,
+        email: form.email,
+        password: form.password,
+      });
+      // refresh
+      const res = await adminApi.get("/admin/students", {
+        params: { q: query, page: currentPage, limit: ROWS_PER_PAGE, sortBy: sortField, order: sortOrder },
+      });
+      setStudents(res.data.data.students || []);
+      setTotalItems(res.data.data.total || 0);
       setShowCreateModal(false);
     } catch (err) {
-      console.error("Create student error:", err);
+      console.error(err);
       alert("Failed to create student");
     }
   };
 
-  const handleEditStudent = async () => {
+  const openEdit = (s: Student) => {
+    setSelectedStudent(s);
+    setForm({
+      student_id: s.student_id,
+      name: s.name,
+      email: s.email,
+      password: "",
+    });
+    setShowEditModal(true);
+  };
+
+  const submitEdit = async () => {
     if (!selectedStudent) return;
-
     try {
-      const res = await adminApi.put(
-        `/admin/students/${selectedStudent.student_id}`,
-        { name: formData.name }
-      );
-
+      // Don't send student_id as primary key usually doesn't change
+      await adminApi.put(`/admin/students/${selectedStudent.student_id}`, {
+        name: form.name,
+        email: form.email,
+      });
       setStudents((prev) =>
-        prev.map((s) =>
-          s.student_id === selectedStudent.student_id ? res.data.data : s
+        prev.map((st) =>
+          st.student_id === selectedStudent.student_id
+            ? { ...st, name: form.name, email: form.email }
+            : st
         )
       );
-
       setShowEditModal(false);
-      setSelectedStudent(null);
     } catch (err) {
-      console.error("Edit student error:", err);
+      console.error(err);
       alert("Failed to update student");
     }
   };
 
-  const handleResetPassword = async () => {
+  const openReset = (s: Student) => {
+    setSelectedStudent(s);
+    setForm({ ...form, password: "" });
+    setShowResetModal(true);
+  };
+
+  const submitReset = async () => {
     if (!selectedStudent) return;
-
     try {
-      await adminApi.post(
-        `/admin/students/${selectedStudent.student_id}/reset-password`,
-        { password: formData.password }
-      );
-
+      await adminApi.put(`/admin/students/${selectedStudent.student_id}/password`, {
+        password: form.password,
+      });
+      alert("Password reset successfully");
       setShowResetModal(false);
-      setSelectedStudent(null);
     } catch (err) {
-      console.error("Reset password error:", err);
+      console.error(err);
       alert("Failed to reset password");
     }
   };
 
-  const handleDeleteStudent = async () => {
-    if (!selectedStudent) return;
+  const openDelete = (s: Student) => {
+    setSelectedStudent(s);
+    setShowDeleteModal(true);
+  };
 
+  const submitDelete = async () => {
+    if (!selectedStudent) return;
     try {
       await adminApi.delete(`/admin/students/${selectedStudent.student_id}`);
-
-      setStudents((prev) =>
-        prev.filter((s) => s.student_id !== selectedStudent.student_id)
-      );
-
+      setStudents((prev) => prev.filter((st) => st.student_id !== selectedStudent.student_id));
       setShowDeleteModal(false);
-      setSelectedStudent(null);
     } catch (err) {
-      console.error("Delete student error:", err);
+      console.error(err);
       alert("Failed to delete student");
     }
   };
 
   return (
-    <div className="p-8 text-white">
+    <div className="p-8 text-white min-h-screen">
+      {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-        <h1 className="text-3xl font-bold">Manage Students</h1>
+        <h1 className="text-3xl font-bold">Admin — Students</h1>
 
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
             <input 
               type="text"
-              placeholder="Search by ID or Name..."
+              placeholder="Search by ID, name, email..."
               className="pl-10 pr-4 py-2 bg-[#101010] border border-white/10 rounded-lg text-white focus:outline-none focus:border-blue-500 w-full sm:w-64 transition"
               value={query}
               onChange={(e) => {
@@ -211,124 +234,88 @@ export default function AdminStudents() {
           </div>
 
           <button
-            onClick={() => {
-              setFormData({ student_id: "", name: "", email: "", password: "" });
-              setShowCreateModal(true);
-            }}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg flex items-center justify-center gap-2 transition"
+            onClick={openCreate}
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 transition"
           >
-            <UserPlus size={18} /> <span className="hidden sm:inline">Add Student</span>
+            <UserPlus size={18} />
+            <span className="hidden sm:inline">Add Student</span>
           </button>
         </div>
       </div>
 
-      <div className="bg-[#181818]/80 rounded-xl border border-white/10 overflow-hidden">
+      {/* Table */}
+      <div className="bg-[#181818]/70 rounded-xl border border-white/10 overflow-hidden mb-6">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-gray-300">
             <thead className="bg-[#1f1f2f] text-gray-300">
               <tr>
-                {/* SORTABLE: Student ID */}
-                <th 
-                  className="py-4 px-6 text-center whitespace-nowrap cursor-pointer hover:bg-white/5 transition group"
-                  onClick={() => handleSort("student_id")}
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    Student ID
-                    {renderSortIcon("student_id")}
-                  </div>
+                <th className="p-4 cursor-pointer hover:bg-white/5 transition group whitespace-nowrap" onClick={() => handleSort("student_id")}>
+                  <div className="flex items-center gap-2">Student ID {renderSortIcon("student_id")}</div>
                 </th>
-
-                {/* SORTABLE: Name */}
-                <th 
-                  className="py-4 px-6 text-center whitespace-nowrap cursor-pointer hover:bg-white/5 transition group"
-                  onClick={() => handleSort("name")}
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    Name
-                    {renderSortIcon("name")}
-                  </div>
+                <th className="p-4 cursor-pointer hover:bg-white/5 transition group whitespace-nowrap" onClick={() => handleSort("name")}>
+                  <div className="flex items-center gap-2">Name {renderSortIcon("name")}</div>
                 </th>
-
-                <th className="py-4 px-6 text-center whitespace-nowrap">Email</th>
-                <th className="py-4 px-6 text-center whitespace-nowrap">Classes</th>
-                <th className="py-4 px-6 text-center whitespace-nowrap">Actions</th>
+                <th className="p-4 cursor-pointer hover:bg-white/5 transition group whitespace-nowrap" onClick={() => handleSort("email")}>
+                  <div className="flex items-center gap-2">Email {renderSortIcon("email")}</div>
+                </th>
+                <th className="p-4 text-center">Classes</th>
+                <th className="p-4 text-center">Actions</th>
               </tr>
             </thead>
-
             <tbody>
               {loading ? (
                 <tr><td colSpan={5} className="p-6 text-center text-gray-400">Loading...</td></tr>
               ) : students.length === 0 ? (
                 <tr><td colSpan={5} className="p-6 text-center text-gray-400">No students found.</td></tr>
               ) : (
-                students.map((student) => {
-                  const isExpanded = expandedRows.has(student.student_id);
-                  const classCount = student.classes?.length ?? 0;
-
+                students.map((st) => {
+                  const isExpanded = expandedRows.has(st.student_id);
+                  const enrolled = st.classes || [];
                   return (
-                    <React.Fragment key={student.student_id}>
+                    <React.Fragment key={st.student_id}>
                       <tr className="border-t border-white/5 hover:bg-[#222233] transition-colors">
-                        <td className="py-4 px-6 text-center whitespace-nowrap font-medium text-white">
-                          {student.student_id}
-                        </td>
-                        <td className="py-4 px-6 whitespace-nowrap">{student.name}</td>
-                        <td className="py-4 px-6 whitespace-nowrap">{student.email}</td>
-
-                        <td className="py-4 px-6 text-center whitespace-nowrap">
+                        <td className="p-4 font-mono text-gray-400 text-sm">{st.student_id}</td>
+                        <td className="p-4 font-medium text-white">{st.name}</td>
+                        <td className="p-4">{st.email}</td>
+                        <td className="p-4 text-center">
                           <button
-                            onClick={() => toggleRow(student.student_id)}
-                            className="inline-flex items-center justify-center gap-2 text-gray-300 hover:text-white transition"
+                            onClick={() => toggleRow(st.student_id)}
+                            className="flex items-center justify-center gap-2 mx-auto text-sm text-gray-300 hover:text-white transition"
                           >
                             {isExpanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                            {classCount} classes
+                            <span>{enrolled.length} Enrolled</span>
                           </button>
                         </td>
-
-                        <td className="py-4 px-6 flex justify-center gap-3 whitespace-nowrap">
-                           <div className="relative group">
-                              <button onClick={() => { setSelectedStudent(student); setFormData({ student_id: student.student_id, name: student.name, email: student.email, password: "" }); setShowEditModal(true); }} className="p-2 text-yellow-400 hover:text-yellow-300 hover:bg-white/10 rounded-lg transition">
-                                <Edit size={18} />
-                              </button>
-                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Edit</div>
-                            </div>
-
-                            <div className="relative group">
-                              <button onClick={() => { setSelectedStudent(student); setFormData({ ...formData, password: "" }); setShowResetModal(true); }} className="p-2 text-blue-400 hover:text-blue-300 hover:bg-white/10 rounded-lg transition">
-                                <KeyRound size={18} />
-                              </button>
-                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Reset Password</div>
-                            </div>
-
-                            <div className="relative group">
-                              <button onClick={() => { setSelectedStudent(student); setShowDeleteModal(true); }} className="p-2 text-red-400 hover:text-red-300 hover:bg-white/10 rounded-lg transition">
-                                <Trash2 size={18} />
-                              </button>
-                              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Delete</div>
-                            </div>
+                        <td className="p-4 text-center flex justify-center gap-3">
+                          <button onClick={() => openEdit(st)} className="text-yellow-400 hover:text-yellow-300 transition" title="Edit Info">
+                            <Edit size={18} />
+                          </button>
+                          <button onClick={() => openReset(st)} className="text-blue-400 hover:text-blue-300 transition" title="Reset Password">
+                            <KeyRound size={18} />
+                          </button>
+                          <button onClick={() => openDelete(st)} className="text-red-400 hover:text-red-300 transition" title="Delete">
+                            <Trash2 size={18} />
+                          </button>
                         </td>
                       </tr>
-
+                      {/* Expanded Row */}
                       {isExpanded && (
                         <tr className="bg-[#15151b] border-t border-white/5 animate-in fade-in slide-in-from-top-2 duration-200">
-                          <td colSpan={5} className="p-4">
-                            <div className="pl-10 text-left">
-                              <h4 className="text-sm uppercase text-gray-500 font-bold mb-2">Enrolled Classes</h4>
-                              {student.classes && student.classes.length > 0 ? (
-                                <ul className="space-y-1 text-gray-300 text-md">
-                                  {student.classes.map((c) => (
-                                    <li key={c.class_id} className="flex items-center gap-2">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-blue-500"></div>
-                                      <span className="font-medium text-sm text-white">{c.class_name}</span>
-                                      {c.course_code && <span className="text-gray-500">({c.course_code})</span>}
-                                    </li>
+                          <td colSpan={5} className="p-4 pl-12">
+                             <h4 className="text-sm uppercase text-gray-500 font-bold mb-2">Enrolled Classes</h4>
+                             {enrolled.length === 0 ? (
+                               <div className="text-gray-400 italic text-sm">No classes enrolled.</div>
+                             ) : (
+                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                  {enrolled.map(c => (
+                                    <div key={c.class_id} className="flex items-center gap-2 text-gray-300 text-sm">
+                                      <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                                      <span className="font-semibold text-white">{c.course_code}</span>
+                                      <span>— {c.class_name}</span>
+                                    </div>
                                   ))}
-                                </ul>
-                              ) : (
-                                <p className="text-gray-500 italic">
-                                  Not enrolled in any classes.
-                                </p>
-                              )}
-                            </div>
+                               </div>
+                             )}
                           </td>
                         </tr>
                       )}
@@ -341,132 +328,128 @@ export default function AdminStudents() {
         </div>
       </div>
 
-      <div className="flex justify-center items-center gap-4 mt-6">
-        <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-2 rounded-lg hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition">
+      <div className="flex justify-center items-center gap-4 mb-6">
+        <button
+          disabled={currentPage === 1}
+          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+          className="p-2 rounded-lg hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition"
+        >
           <ChevronLeft />
         </button>
-        <p className="text-gray-300">Page <span className="font-bold text-white">{currentPage}</span> of {totalPages}</p>
-        <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="p-2 rounded-lg hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition">
+        <p className="text-gray-300">
+          Page <span className="font-bold text-white">{currentPage}</span> of {totalPages}
+        </p>
+        <button
+          disabled={currentPage === totalPages}
+          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+          className="p-2 rounded-lg hover:bg-white/10 disabled:opacity-30 disabled:hover:bg-transparent transition"
+        >
           <ChevronRight />
         </button>
       </div>
 
-      {/* Modals */}
+      {/* Create Modal */}
       {showCreateModal && (
-        <StudentModal
-          title="Add Student"
-          formData={formData}
-          setFormData={setFormData}
-          disableStudentId={false}
+        <CreateStudentModal
+          form={form}
+          setForm={setForm}
           onClose={() => setShowCreateModal(false)}
-          onSubmit={handleCreateStudent}
+          onSubmit={submitCreate}
         />
       )}
 
-      {showEditModal && selectedStudent && (
-        <StudentModal
-          title="Edit Student"
-          formData={formData}
-          setFormData={setFormData}
-          disableStudentId={true}
+      {/* Edit Modal */}
+      {showEditModal && (
+        <EditStudentModal
+          form={form}
+          setForm={setForm}
           onClose={() => setShowEditModal(false)}
-          onSubmit={handleEditStudent}
+          onSubmit={submitEdit}
         />
       )}
 
+      {/* Reset Password Modal */}
       {showResetModal && (
-        <PasswordResetModal
+        <ResetPasswordModal
+          form={form}
+          setForm={setForm}
           student={selectedStudent}
-          newPassword={formData.password}
-          setNewPassword={(pw: string) =>
-            setFormData({ ...formData, password: pw })
-          }
           onClose={() => setShowResetModal(false)}
-          onSubmit={handleResetPassword}
+          onSubmit={submitReset}
         />
       )}
 
+      {/* Delete Modal */}
       {showDeleteModal && (
         <DeleteModal
           student={selectedStudent}
           onClose={() => setShowDeleteModal(false)}
-          onConfirm={handleDeleteStudent}
+          onConfirm={submitDelete}
         />
       )}
     </div>
   );
 }
 
-/* -----------------------------------
-   MODALS
------------------------------------- */
+/* -----------------------------
+   MODAL COMPONENTS (Refactored)
+----------------------------- */
 
-function StudentModal({
-  title,
-  formData,
-  setFormData,
-  onClose,
-  onSubmit,
-  disableStudentId,
-}: any) {
+function CreateStudentModal({ form, setForm, onClose, onSubmit }: any) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4">
-      <div className="bg-[#181818] p-6 rounded-xl w-full max-w-md border border-white/10">
-        <h2 className="text-xl font-bold mb-4">{title}</h2>
+    <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
+      <div className="bg-[#181818] p-6 rounded-xl w-full max-w-md border border-white/10 shadow-xl">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold">Create New Student</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl">×</button>
+        </div>
 
         <div className="space-y-4">
-          {!disableStudentId && (
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Student ID</label>
             <input
-              className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg"
-              placeholder="Student ID (8 digits)"
-              value={formData.student_id}
-              onChange={(e) =>
-                setFormData({ ...formData, student_id: e.target.value })
-              }
+              placeholder="e.g. 21012345"
+              className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+              value={form.student_id}
+              onChange={(e) => setForm({ ...form, student_id: e.target.value })}
             />
-          )}
-
-          <input
-            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg"
-            placeholder="Full Name"
-            value={formData.name}
-            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-          />
-
-          <input
-            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg"
-            placeholder="Email Address"
-            value={formData.email}
-            onChange={(e) =>
-              setFormData({ ...formData, email: e.target.value })
-            }
-          />
-
-          {!disableStudentId && (
+          </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Full Name</label>
+            <input
+              placeholder="e.g. John Doe"
+              className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Email Address</label>
+            <input
+              placeholder="e.g. im.student@imail.sunway.edu.my"
+              className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Password</label>
             <input
               type="password"
-              className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg"
-              placeholder="Password"
-              value={formData.password}
-              onChange={(e) =>
-                setFormData({ ...formData, password: e.target.value })
-              }
+              placeholder="Initial password"
+              className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
             />
-          )}
+          </div>
         </div>
 
         <div className="flex justify-end gap-3 mt-6">
-          <button
-            className="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500"
-            onClick={onClose}
-          >
+          <button className="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500" onClick={onClose}>
             Cancel
           </button>
-          <button
-            className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-500"
-            onClick={onSubmit}
-          >
-            Save
+          <button className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-500" onClick={onSubmit}>
+            Create
           </button>
         </div>
       </div>
@@ -474,39 +457,72 @@ function StudentModal({
   );
 }
 
-function PasswordResetModal({
-  student,
-  newPassword,
-  setNewPassword,
-  onClose,
-  onSubmit,
-}: any) {
+function EditStudentModal({ form, setForm, onClose, onSubmit }: any) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4">
-      <div className="bg-[#181818] p-6 rounded-xl w-full max-w-md border border-white/10">
-        <h2 className="text-xl font-bold mb-4">
-          Reset Password for {student?.name}
-        </h2>
+    <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
+      <div className="bg-[#181818] p-6 rounded-xl w-full max-w-md border border-white/10 shadow-xl">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold">Edit Student</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl">×</button>
+        </div>
 
-        <input
-          type="password"
-          className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg"
-          placeholder="Enter New Password"
-          value={newPassword}
-          onChange={(e) => setNewPassword(e.target.value)}
-        />
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Full Name</label>
+            <input
+              className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+              value={form.name}
+              onChange={(e) => setForm({ ...form, name: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Email Address</label>
+            <input
+              className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
+            />
+          </div>
+        </div>
 
         <div className="flex justify-end gap-3 mt-6">
-          <button
-            className="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500"
-            onClick={onClose}
-          >
+          <button className="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500" onClick={onClose}>
             Cancel
           </button>
-          <button
-            className="px-4 py-2 bg-green-600 rounded-lg hover:bg-green-500"
-            onClick={onSubmit}
-          >
+          <button className="px-4 py-2 bg-green-600 rounded-lg hover:bg-green-500" onClick={onSubmit}>
+            Save Changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResetPasswordModal({ form, setForm, student, onClose, onSubmit }: any) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
+      <div className="bg-[#181818] p-6 rounded-xl w-full max-w-md border border-white/10 shadow-xl">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-semibold">Reset Password — {student?.name}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl">×</button>
+        </div>
+
+        <div>
+          <label className="block text-sm text-gray-400 mb-1">New Password</label>
+          <input
+            type="password"
+            placeholder="Enter new password..."
+            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+            value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+          />
+        </div>
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button className="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500" onClick={onClose}>
+            Cancel
+          </button>
+          <button className="px-4 py-2 bg-orange-600 rounded-lg hover:bg-orange-500" onClick={onSubmit}>
             Reset Password
           </button>
         </div>
@@ -517,30 +533,24 @@ function PasswordResetModal({
 
 function DeleteModal({ student, onClose, onConfirm }: any) {
   return (
-    <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4">
-      <div className="bg-[#181818] p-6 rounded-xl w-full max-w-md border border-white/10">
-        <h2 className="text-xl font-bold text-red-400 mb-4">
-          Delete Student?
-        </h2>
+    <div className="fixed inset-0 bg-black/50 flex justify-center items-center p-4 z-50">
+      <div className="bg-[#181818] p-6 rounded-xl w-full max-w-md border border-white/10 shadow-xl">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-bold text-red-400">Delete Student?</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white text-xl">×</button>
+        </div>
 
         <p className="text-gray-300 mb-4">
-          Removing <b>{student?.name}</b> will also unenroll them from all
-          enrolled classes.  
+          Removing <b>{student?.name}</b> will also unenroll them from all enrolled classes.
           This action cannot be undone.
         </p>
 
         <div className="flex justify-end gap-3 mt-6">
-          <button
-            className="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500"
-            onClick={onClose}
-          >
+          <button className="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500" onClick={onClose}>
             Cancel
           </button>
-          <button
-            className="px-4 py-2 bg-red-600 rounded-lg hover:bg-red-500"
-            onClick={onConfirm}
-          >
-            Delete
+          <button className="px-4 py-2 bg-red-600 rounded-lg hover:bg-red-500" onClick={onConfirm}>
+            Delete Student
           </button>
         </div>
       </div>

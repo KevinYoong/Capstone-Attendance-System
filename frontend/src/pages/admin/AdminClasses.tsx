@@ -41,7 +41,6 @@ interface ClassItem {
   start_week: number;
   end_week: number;
   class_type: "Lecture" | "Tutorial";
-  // Updated: this comes populated from backend now
   students_enrolled: Student[];
 }
 
@@ -59,7 +58,7 @@ export default function AdminClasses() {
   // Pagination & Filtering (Server-Side)
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [totalItems, setTotalItems] = useState<number>(0);
-  const [query, setQuery] = useState(""); // Searches Class Name & Course Code
+  const [query, setQuery] = useState(""); 
 
   // Sorting
   const [sortField, setSortField] = useState<string>("class_id");
@@ -67,7 +66,7 @@ export default function AdminClasses() {
 
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
 
-  // Create / Edit / Assign / Delete modals
+  // Modals
   const [showCreate, setShowCreate] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [showAssign, setShowAssign] = useState(false);
@@ -93,13 +92,12 @@ export default function AdminClasses() {
   const [assignSelected, setAssignSelected] = useState<Set<number>>(new Set());
 
   /* -----------------------------
-     Load Data (Server Side for Classes)
+     Load Data
   ----------------------------- */
   useEffect(() => {
     async function fetchData() {
         setLoading(true);
         try {
-            // 1. Fetch Classes (Paginated/Sorted/Filtered)
             const cRes = await adminApi.get("/admin/classes", {
                 params: {
                     q: query,
@@ -112,11 +110,6 @@ export default function AdminClasses() {
             setClasses(cRes.data.data.classes || []);
             setTotalItems(cRes.data.data.total || 0);
 
-            // 2. Fetch full lists of lecturers & students ONCE (for modals)
-            // Optimization: In a real large app, you might only fetch these when opening the modal.
-            // For now, keeping your existing pattern but separating it from the table reload would be better
-            // IF we hadn't put it in the same useEffect.
-            // Let's optimize: Only fetch lecturers/students if lists are empty.
             if (lecturers.length === 0) {
                const lRes = await adminApi.get("/admin/lecturers");
                setLecturers(lRes.data.data.lecturers || []);
@@ -138,7 +131,7 @@ export default function AdminClasses() {
     }
     const timeoutId = setTimeout(() => fetchData(), 300);
     return () => clearTimeout(timeoutId);
-  }, [currentPage, query, sortField, sortOrder]); // Trigger on sort/page/search change
+  }, [currentPage, query, sortField, sortOrder]);
 
   /* -----------------------------
      Sorting Helpers
@@ -175,7 +168,7 @@ export default function AdminClasses() {
   };
 
   /* -----------------------------
-     Handlers — Create
+     Handlers
   ----------------------------- */
   const openCreate = () => {
     setSelectedClass(null);
@@ -197,10 +190,7 @@ export default function AdminClasses() {
     try {
       const payload = { ...form, lecturer_id: Number(form.lecturer_id) };
       const res = await adminApi.post("/admin/classes", payload);
-      // Re-fetch to see new class respecting sort/page
-      // Alternatively, insert locally if on page 1. For simplicity, just reload or rely on useEffect logic if we reset state.
-      // Easiest is to just add to local state if sort is 'desc' and field is 'class_id'.
-      // Let's just rely on a re-fetch or a simple prepend.
+      
       const created = {
         ...res.data.data,
         lecturer_name: lecturers.find((l) => l.lecturer_id === payload.lecturer_id)?.name ?? "",
@@ -214,9 +204,6 @@ export default function AdminClasses() {
     }
   };
 
-  /* -----------------------------
-     Handlers — Edit
-  ----------------------------- */
   const openEdit = (cls: ClassItem) => {
     setSelectedClass(cls);
     setForm({
@@ -256,9 +243,6 @@ export default function AdminClasses() {
     }
   };
 
-  /* -----------------------------
-     Handlers — Delete
-  ----------------------------- */
   const openDelete = (cls: ClassItem) => {
     setSelectedClass(cls);
     setShowDelete(true);
@@ -276,9 +260,6 @@ export default function AdminClasses() {
     }
   };
 
-  /* -----------------------------
-     Handlers — Assign Students
-  ----------------------------- */
   const openAssign = (cls: ClassItem) => {
     setSelectedClass(cls);
     setAssignSearch("");
@@ -336,7 +317,6 @@ export default function AdminClasses() {
         <h1 className="text-3xl font-bold">Admin — Classes</h1>
 
         <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-          {/* Search Bar */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={18} />
             <input 
@@ -367,7 +347,6 @@ export default function AdminClasses() {
           <table className="w-full text-left text-gray-300">
             <thead className="bg-[#1f1f2f] text-gray-300">
               <tr>
-                {/* Sortable Class Name */}
                 <th 
                   className="p-4 cursor-pointer hover:bg-white/5 transition group whitespace-nowrap"
                   onClick={() => handleSort("class_name")}
@@ -377,8 +356,6 @@ export default function AdminClasses() {
                     {renderSortIcon("class_name")}
                   </div>
                 </th>
-
-                {/* Sortable Course Code */}
                 <th 
                   className="p-4 cursor-pointer hover:bg-white/5 transition group whitespace-nowrap"
                   onClick={() => handleSort("course_code")}
@@ -388,7 +365,6 @@ export default function AdminClasses() {
                     {renderSortIcon("course_code")}
                   </div>
                 </th>
-
                 <th className="p-4 whitespace-nowrap">Lecturer</th>
                 <th className="p-4 whitespace-nowrap">Day & Time</th>
                 <th className="p-4 whitespace-nowrap text-center">Weeks</th>
@@ -405,18 +381,12 @@ export default function AdminClasses() {
               ) : (
                 classes.map((cls) => {
                   const isExpanded = expandedRows.has(cls.class_id);
-
                   return (
-                    // React.Fragment fixes the nesting layout issue
                     <React.Fragment key={cls.class_id}>
                       <tr className="border-t border-white/5 hover:bg-[#222233] transition-colors">
                         <td className="p-4 font-medium text-white">{cls.class_name}</td>
                         <td className="p-4">{cls.course_code}</td>
-
-                        <td className="p-4">
-                          {cls.lecturer_name || "—"}
-                        </td>
-
+                        <td className="p-4">{cls.lecturer_name || "—"}</td>
                         <td className="p-4">
                           {cls.day_of_week}
                           <br />
@@ -424,11 +394,7 @@ export default function AdminClasses() {
                             {cls.start_time}–{cls.end_time}
                           </span>
                         </td>
-
-                        <td className="p-4 text-center">
-                          Week {cls.start_week}–{cls.end_week}
-                        </td>
-
+                        <td className="p-4 text-center">Week {cls.start_week}–{cls.end_week}</td>
                         <td className="p-4 text-center">
                           <button
                             onClick={() => toggleRow(cls.class_id)}
@@ -438,37 +404,27 @@ export default function AdminClasses() {
                             <span>{cls.students_enrolled.length} students</span>
                           </button>
                         </td>
-
                         <td className="p-4 text-right flex justify-center gap-3">
-                          
-                          {/* Edit Button with Tooltip */}
                           <div className="relative group">
                             <button onClick={() => openEdit(cls)} className="text-yellow-400 hover:text-yellow-300 transition">
                               <Edit size={16} />
                             </button>
                             <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Edit</div>
                           </div>
-
-                          {/* Assign Button with Tooltip */}
                           <div className="relative group">
                             <button onClick={() => openAssign(cls)} className="text-blue-400 hover:text-blue-300 transition">
                               <Users size={16} />
                             </button>
                             <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Assign</div>
                           </div>
-
-                          {/* Delete Button with Tooltip */}
                           <div className="relative group">
                             <button onClick={() => openDelete(cls)} className="text-red-400 hover:text-red-300 transition">
                               <Trash2 size={16} />
                             </button>
                             <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 bg-black text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap">Delete</div>
                           </div>
-
                         </td>
                       </tr>
-
-                      {/* Expanded Student List */}
                       {isExpanded && (
                         <tr className="bg-[#15151b] border-t border-white/5 animate-in fade-in slide-in-from-top-2 duration-200">
                           <td colSpan={7} className="p-4">
@@ -499,7 +455,6 @@ export default function AdminClasses() {
         </div>
       </div>
 
-      {/* Pagination */}
       <div className="flex justify-center items-center gap-4 mb-6">
         <button
           disabled={currentPage === 1}
@@ -508,11 +463,9 @@ export default function AdminClasses() {
         >
           <ChevronLeft />
         </button>
-
         <p className="text-gray-300">
           Page <span className="font-bold text-white">{currentPage}</span> of {totalPages}
         </p>
-
         <button
           disabled={currentPage === totalPages}
           onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
@@ -522,7 +475,6 @@ export default function AdminClasses() {
         </button>
       </div>
 
-      {/* ---------- CREATE MODAL (Unchanged) ---------- */}
       {showCreate && (
         <ModalShell title="Create Class" onClose={() => setShowCreate(false)}>
           <ClassForm form={form} setForm={setForm} lecturers={lecturers} />
@@ -530,7 +482,6 @@ export default function AdminClasses() {
         </ModalShell>
       )}
 
-      {/* ---------- EDIT MODAL (Unchanged) ---------- */}
       {showEdit && selectedClass && (
         <ModalShell title="Edit Class" onClose={() => setShowEdit(false)}>
           <ClassForm form={form} setForm={setForm} lecturers={lecturers} />
@@ -538,7 +489,6 @@ export default function AdminClasses() {
         </ModalShell>
       )}
 
-      {/* ---------- ASSIGN MODAL (Unchanged) ---------- */}
       {showAssign && selectedClass && (
         <ModalShell title={`Assign Students — ${selectedClass.class_name}`} onClose={() => setShowAssign(false)}>
           <AssignStudents assignSearch={assignSearch} setAssignSearch={setAssignSearch} filteredStudents={filteredStudents} assignSelected={assignSelected} setAssignSelected={setAssignSelected} />
@@ -546,7 +496,6 @@ export default function AdminClasses() {
         </ModalShell>
       )}
 
-      {/* ---------- DELETE MODAL (Unchanged) ---------- */}
       {showDelete && selectedClass && (
         <ModalShell title="Delete Class" onClose={() => setShowDelete(false)}>
           <p className="text-gray-300 mb-4">
@@ -560,29 +509,38 @@ export default function AdminClasses() {
 }
 
 /* -----------------------------
-   CLASS FORM COMPONENT
+   CLASS FORM COMPONENT 
 ----------------------------- */
 function ClassForm({ form, setForm, lecturers }: any) {
   return (
-    <div className="space-y-3">
-      <input
-        placeholder="Class name"
-        className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg"
-        value={form.class_name}
-        onChange={(e) => setForm({ ...form, class_name: e.target.value })}
-      />
-
-      <input
-        placeholder="Course code"
-        className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg"
-        value={form.course_code}
-        onChange={(e) => setForm({ ...form, course_code: e.target.value })}
-      />
-
+    <div className="space-y-4">
+      {/* Class Name */}
       <div>
-        <label className="text-sm text-gray-300 block mb-1">Lecturer</label>
+        <label className="block text-sm text-gray-400 mb-1">Class Name</label>
+        <input
+          placeholder="e.g. Introduction to Computing"
+          className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+          value={form.class_name}
+          onChange={(e) => setForm({ ...form, class_name: e.target.value })}
+        />
+      </div>
+
+      {/* Course Code */}
+      <div>
+        <label className="block text-sm text-gray-400 mb-1">Course Code</label>
+        <input
+          placeholder="e.g. CSCP1014"
+          className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+          value={form.course_code}
+          onChange={(e) => setForm({ ...form, course_code: e.target.value })}
+        />
+      </div>
+
+      {/* Lecturer */}
+      <div>
+        <label className="block text-sm text-gray-400 mb-1">Lecturer</label>
         <select
-          className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg"
+          className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
           value={form.lecturer_id}
           onChange={(e) => setForm({ ...form, lecturer_id: Number(e.target.value) })}
         >
@@ -595,10 +553,11 @@ function ClassForm({ form, setForm, lecturers }: any) {
         </select>
       </div>
 
+      {/* Day */}
       <div>
-        <label className="text-sm text-gray-300 block mb-1">Day</label>
+        <label className="block text-sm text-gray-400 mb-1">Day</label>
         <select
-          className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg"
+          className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
           value={form.day_of_week}
           onChange={(e) => setForm({ ...form, day_of_week: e.target.value })}
         >
@@ -608,40 +567,52 @@ function ClassForm({ form, setForm, lecturers }: any) {
         </select>
       </div>
 
+      {/* Time (Start & End) */}
       <div className="flex gap-3">
-        <input
-          type="time"
-          className="flex-1 p-3 bg-[#101010] border border-white/10 rounded-lg"
-          value={form.start_time}
-          onChange={(e) => setForm({ ...form, start_time: e.target.value })}
-        />
-
-        <input
-          type="time"
-          className="flex-1 p-3 bg-[#101010] border border-white/10 rounded-lg"
-          value={form.end_time}
-          onChange={(e) => setForm({ ...form, end_time: e.target.value })}
-        />
+        <div className="flex-1">
+          <label className="block text-sm text-gray-400 mb-1">Start Time</label>
+          <input
+            type="time"
+            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+            value={form.start_time}
+            onChange={(e) => setForm({ ...form, start_time: e.target.value })}
+          />
+        </div>
+        <div className="flex-1">
+          <label className="block text-sm text-gray-400 mb-1">End Time</label>
+          <input
+            type="time"
+            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+            value={form.end_time}
+            onChange={(e) => setForm({ ...form, end_time: e.target.value })}
+          />
+        </div>
       </div>
 
+      {/* Weeks (Start & End) */}
       <div className="flex gap-3">
-        <input
-          type="number"
-          className="flex-1 p-3 bg-[#101010] border border-white/10 rounded-lg"
-          value={form.start_week}
-          min={1}
-          max={14}
-          onChange={(e) => setForm({ ...form, start_week: Number(e.target.value) })}
-        />
-
-        <input
-          type="number"
-          className="flex-1 p-3 bg-[#101010] border border-white/10 rounded-lg"
-          value={form.end_week}
-          min={1}
-          max={14}
-          onChange={(e) => setForm({ ...form, end_week: Number(e.target.value) })}
-        />
+        <div className="flex-1">
+          <label className="block text-sm text-gray-400 mb-1">Start Week</label>
+          <input
+            type="number"
+            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+            value={form.start_week}
+            min={1}
+            max={14}
+            onChange={(e) => setForm({ ...form, start_week: Number(e.target.value) })}
+          />
+        </div>
+        <div className="flex-1">
+          <label className="block text-sm text-gray-400 mb-1">End Week</label>
+          <input
+            type="number"
+            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
+            value={form.end_week}
+            min={1}
+            max={14}
+            onChange={(e) => setForm({ ...form, end_week: Number(e.target.value) })}
+          />
+        </div>
       </div>
     </div>
   );
@@ -663,13 +634,13 @@ function AssignStudents({
         placeholder="Search students..."
         value={assignSearch}
         onChange={(e) => setAssignSearch(e.target.value)}
-        className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg"
+        className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white"
       />
 
       {filteredStudents.map((s: any) => (
         <label
           key={s.student_id}
-          className="flex items-center gap-3 bg-[#111] p-2 rounded-lg border border-white/10"
+          className="flex items-center gap-3 bg-[#111] p-2 rounded-lg border border-white/10 cursor-pointer hover:bg-white/5 transition"
         >
           <input
             type="checkbox"
@@ -679,6 +650,7 @@ function AssignStudents({
               e.target.checked ? next.add(s.student_id) : next.delete(s.student_id);
               setAssignSelected(next);
             }}
+            className="accent-blue-600 w-4 h-4"
           />
           <div>
             <div className="text-sm font-medium">{s.name}</div>
@@ -717,12 +689,12 @@ function ModalShell({ title, onClose, children }: any) {
 function FormActions({ onCancel, onSubmit, submitText, danger }: any) {
   return (
     <div className="flex justify-end gap-3 mt-4">
-      <button onClick={onCancel} className="px-4 py-2 bg-gray-600 rounded-lg">
+      <button onClick={onCancel} className="px-4 py-2 bg-gray-600 rounded-lg hover:bg-gray-500 transition">
         Cancel
       </button>
       <button
         onClick={onSubmit}
-        className={`px-4 py-2 rounded-lg ${
+        className={`px-4 py-2 rounded-lg transition ${
           danger ? "bg-red-600 hover:bg-red-500" : "bg-green-600 hover:bg-green-500"
         }`}
       >
