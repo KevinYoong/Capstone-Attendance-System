@@ -176,7 +176,7 @@ export default function StudentDashboard() {
   }, [user?.id, semester]);
 
   // ---------------------------------------------------------
-  // 1. Initial Load: Socket + Semester + Active Sessions
+  // 1. INITIAL SETUP (Runs ONCE on mount/login)
   // ---------------------------------------------------------
   useEffect(() => {
     if (!user) return;
@@ -209,8 +209,20 @@ export default function StudentDashboard() {
     fetchSemester();
     fetchActiveSessions();
 
-    // Socket listeners...
-    socket.on("checkinActivated", (data: any) => {
+    return () => {
+      socket.emit("leaveStudentRooms", user.id);
+    };
+    // ⚠️ DEPENDENCIES: Removed fetchAttendanceSemester to stop the loop
+  }, [user?.id, fetchActiveSessions]);
+
+  // ---------------------------------------------------------
+  // 2. SOCKET LISTENERS (Updates when dependencies change)
+  // ---------------------------------------------------------
+  useEffect(() => {
+    if (!user) return;
+
+    // Defined here so they close over the latest state/functions
+    const onCheckinActivated = (data: any) => {
       const onlineMode = data.online_mode ?? data.onlineMode ?? false;
       setActiveSessions((prev) => ({
         ...prev,
@@ -222,9 +234,9 @@ export default function StudentDashboard() {
           scheduled_date: data.scheduled_date,
         },
       }));
-    });
+    };
 
-    socket.on("studentCheckedIn", (data: any) => {
+    const onStudentCheckedIn = (data: any) => {
       if (data.student_id === user?.id) {
         setAttendanceSessions(prev => prev.map(session => {
             if (session.session_id === data.session_id) {
@@ -233,41 +245,33 @@ export default function StudentDashboard() {
             return session;
         }));
         
-        setAttendanceSummaryByClass(prev => {
-            const cls = prev[data.class_id];
-            if (!cls) return prev;
-            return prev; 
-        });
+        fetchAttendanceSemester();
       }
-    });
+    };
 
-    socket.on("sessionExpired", (data: any) => {
+    const onSessionExpired = (data: any) => {
       setActiveSessions((prev) => {
         const copy = { ...prev };
         delete copy[data.class_id];
         return copy;
       });
 
-      setAttendanceSessions(prev => prev.map(session => {
-          if (session.class_id === data.class_id && session.session_id === data.session_id) {
-             if (session.student_status !== 'present' && session.student_status !== 'checked-in') {
-                 return { ...session, student_status: 'missed' };
-             }
-          }
-          return session;
-      }));
-    });
+      fetchAttendanceSemester();
+    };
+
+    socket.on("checkinActivated", onCheckinActivated);
+    socket.on("studentCheckedIn", onStudentCheckedIn);
+    socket.on("sessionExpired", onSessionExpired);
 
     return () => {
-      socket.off("checkinActivated");
-      socket.off("studentCheckedIn");
-      socket.off("sessionExpired");
-      socket.emit("leaveStudentRooms", user.id);
+      socket.off("checkinActivated", onCheckinActivated);
+      socket.off("studentCheckedIn", onStudentCheckedIn);
+      socket.off("sessionExpired", onSessionExpired);
     };
-  }, [user?.id]); 
+  }, [user?.id, fetchAttendanceSemester]);
 
   // ---------------------------------------------------------
-  // 2. Fetch Attendance when Semester is Ready
+  // 3. Fetch Attendance when Semester is Ready
   // ---------------------------------------------------------
   useEffect(() => {
     if (user && semester) {
@@ -276,7 +280,7 @@ export default function StudentDashboard() {
   }, [user, semester, fetchAttendanceSemester]);
 
   // ---------------------------------------------------------
-  // 3. Fetch Schedule when Week Changes
+  // 4. Fetch Schedule when Week Changes
   // ---------------------------------------------------------
   useEffect(() => {
     if (!user || !semester) return;
@@ -355,7 +359,6 @@ export default function StudentDashboard() {
       return;
     }
 
-    // 1. Set Loading State
     setCheckingInClassId(classId);
 
     if (!navigator.geolocation) {
@@ -377,12 +380,12 @@ export default function StudentDashboard() {
           });
 
           if (response.data.success) {
+             // Optimistic update
              setAttendanceSessions(prev => {
                  const exists = prev.find(s => s.session_id === session.session_id);
                  if (exists) {
                      return prev.map(s => s.session_id === session.session_id ? { ...s, student_status: 'present' } : s);
                  }
-                 
                  return [...prev, {
                      session_id: session.session_id,
                      class_id: classId,
@@ -397,14 +400,12 @@ export default function StudentDashboard() {
           const errorMessage = error.response?.data?.message || "Check-in failed";
           alert(`❌ ${errorMessage}`);
         } finally {
-          // 2. Reset Loading State (Success or Fail)
           setCheckingInClassId(null);
         }
       },
       (error) => {
         alert("❌ Unable to retrieve location. Please allow location access.");
         console.error("Geolocation error:", error);
-        // 2. Reset Loading State (Geo Fail)
         setCheckingInClassId(null);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
