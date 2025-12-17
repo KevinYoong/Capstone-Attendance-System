@@ -269,10 +269,10 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
         SELECT *
         FROM Session
         WHERE class_id = ?
-          AND DATE(started_at) = ?
+          AND (scheduled_date = ? OR DATE(started_at) = ?)
         LIMIT 1
         `,
-        [class_id, selectedDate]
+        [class_id, selectedDate, selectedDate]
       );
 
       session = sessionRows.length > 0 ? sessionRows[0] : null;

@@ -98,7 +98,7 @@ export default function LecturerClassDetail() {
 
           let status: "checked-in" | "missed" | "pending" = "pending";
 
-          if (checkinStatus === "checked-in") {
+          if (checkinStatus === "checked-in" || checkinStatus === "present") {
             status = "checked-in";
           } else if (checkinStatus === "missed" || (rawSession?.is_expired && !checkinStatus)) {
             status = "missed";

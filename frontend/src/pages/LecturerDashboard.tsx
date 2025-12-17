@@ -75,7 +75,7 @@ export default function LecturerDashboard() {
   const [openDays, setOpenDays] = useState<string[]>([]);
 
   // Track which sessions are currently active (check-in activated)
-  const [activeSessions, setActiveSessions] = useState<Record<number, boolean>>({});
+  const [activeSessions, setActiveSessions] = useState<Record<number, string>>({});
 
   // Track which classes had active sessions by class_id and date (format: "classId_YYYY-MM-DD")
   const [pastActivatedSessions, setPastActivatedSessions] = useState<Set<string>>(new Set());
@@ -93,7 +93,7 @@ export default function LecturerDashboard() {
 
   // Fetch active sessions for all classes in the current week
   const fetchActiveSessionsForWeek = async (classes: Class[]) => {
-  const map: Record<number, boolean> = {};
+  const map: Record<number, string> = {}; 
 
   for (const cls of classes) {
     try {
@@ -101,19 +101,52 @@ export default function LecturerDashboard() {
         `http://localhost:3001/lecturer/class/${cls.class_id}/active-session`
       );
 
+      // If active, save the Expiry Time. If not, ignore.
       if (res.data?.session && !res.data.session.is_expired) {
-        map[cls.class_id] = true; // Active
-      } else {
-        map[cls.class_id] = false; // Not active
+        map[cls.class_id] = res.data.session.expires_at; 
       }
     } catch (err) {
       console.error("Error fetching active session for class:", cls.class_id, err);
-      map[cls.class_id] = false;
     }
   }
 
   setActiveSessions(map);
 };
+
+useEffect(() => {
+  const interval = setInterval(() => {
+    const now = new Date();
+
+    setActiveSessions((prevSessions) => {
+      const nextSessions = { ...prevSessions };
+      let hasChanges = false;
+
+      Object.entries(nextSessions).forEach(([classIdStr, expiresAt]) => {
+        // If expired
+        if (expiresAt && new Date(expiresAt) < now) {
+          const classId = Number(classIdStr);
+          
+          // 1. Remove from Active
+          delete nextSessions[classId]; 
+          
+          setPastActivatedSessions(prev => {
+             const newSet = new Set(prev);
+             // We assume the expired session happened "today" for the dashboard view
+             const todayStr = formatLocalYMD(new Date()); 
+             newSet.add(`${classId}_${todayStr}`);
+             return newSet;
+          });
+
+          hasChanges = true;
+        }
+      });
+
+      return hasChanges ? nextSessions : prevSessions;
+    });
+  }, 1000); 
+
+  return () => clearInterval(interval);
+}, []);
 
   useEffect(() => {
     if (!user) return;
@@ -497,9 +530,10 @@ export default function LecturerDashboard() {
                           {cls.start_time} - {cls.end_time} ({cls.class_type})
                         </p>
                       </div>
-                      <button
+                       <button
                         onClick={() => handleActivateCheckIn(cls.class_id, day)}
                         className={`mt-2 md:mt-0 px-4 py-2 text-white rounded-lg transition ${
+                          // Check if it exists (truthy)
                           activeSessions[cls.class_id]
                             ? "bg-green-600 hover:bg-green-500"                            
                             : pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`)
