@@ -5,10 +5,7 @@ import { io } from "../../index";
 
 const router = Router();
 
-// ============================================================================
-//                                TYPES & INTERFACES
-// ============================================================================
-
+// ----- TYPES -----
 interface ClassRow extends RowDataPacket {
   class_id: number;
   class_name: string;
@@ -46,30 +43,25 @@ interface SemesterRow extends RowDataPacket {
   end_date?: string;
 }
 
-/**
- * Calculates the current academic week number based on the semester start date.
- */
 function getAcademicWeek(startDate: Date, targetDate: Date): number {
   const diff = targetDate.getTime() - startDate.getTime();
   return Math.floor(diff / (7 * 24 * 60 * 60 * 1000)) + 1;
 }
 
-// ============================================================================
-//                            SCHEDULE & DASHBOARD
-// ============================================================================
+// ----- ROUTES -----
 
-/**
- * GET /:lecturer_id/classes/week
- * Retrieves the weekly schedule for a lecturer, organized by day of the week.
- * @query week - Optional week number (or "break") to filter logic if needed.
- */
+// Get weekly schedule for a lecturer
 router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => {
   const { lecturer_id } = req.params;
   const selectedWeek = req.query.week;
 
   if (selectedWeek === "break") {
     return res.json({
-      Monday: [], Tuesday: [], Wednesday: [], Thursday: [], Friday: []
+      Monday: [],
+      Tuesday: [],
+      Wednesday: [],
+      Thursday: [],
+      Friday: []
     });
   }
 
@@ -84,13 +76,15 @@ router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => 
     );
 
     const week: Record<string, ClassRow[]> = {
-      Monday: [], Tuesday: [], Wednesday: [], Thursday: [], Friday: [],
+      Monday: [],
+      Tuesday: [],
+      Wednesday: [],
+      Thursday: [],
+      Friday: [],
     };
 
     rows.forEach(cls => {
-      if (week[cls.day_of_week]) {
-        week[cls.day_of_week].push(cls);
-      }
+      week[cls.day_of_week].push(cls);
     });
 
     res.json(week);
@@ -100,10 +94,6 @@ router.get("/:lecturer_id/classes/week", async (req: Request, res: Response) => 
   }
 });
 
-/**
- * GET /class/:class_id/active-session
- * Checks if a class currently has an active, non-expired check-in session.
- */
 router.get("/class/:class_id/active-session", async (req: Request, res: Response) => {
   const { class_id } = req.params;
 
@@ -129,7 +119,6 @@ router.get("/class/:class_id/active-session", async (req: Request, res: Response
 
     const session = activeRows[0];
 
-    // Fetch students already checked in
     const [checkinRows] = await db.query<any[]>(
       `
       SELECT ci.checkin_id, ci.session_id, ci.student_id, ci.checkin_time, ci.status,
@@ -163,10 +152,6 @@ router.get("/class/:class_id/active-session", async (req: Request, res: Response
   }
 });
 
-/**
- * GET /:lecturer_id/attendance/semester
- * Returns a high-level overview of attendance for all classes in the active semester.
- */
 router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Response) => {
   const { lecturer_id } = req.params;
 
@@ -249,16 +234,7 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
   }
 });
 
-// ============================================================================
-//                            CLASS DETAILS & ACTIONS
-// ============================================================================
-
-/**
- * GET /class/:class_id/details
- * Retrieves detailed info for a specific class (Lecturer View).
- * * IMPORTANT: This endpoint uses 'scheduled_date' to find sessions.
- * This fixes timezone mismatches between the frontend (Local) and backend (UTC).
- */
+// Get detailed class info
 router.get("/class/:class_id/details", async (req: Request, res: Response) => {
   const { class_id } = req.params;
   const selectedDate = req.query.date as string | undefined;
@@ -274,7 +250,6 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
     const classInfo = classRows[0];
     if (!classInfo) return res.status(404).json({ message: "Class not found" });
 
-    // Fetch all enrolled students
     const [studentRows] = await db.query<StudentRow[]>(
       `
       SELECT Student.student_id, Student.name, Student.email
@@ -289,7 +264,6 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
     let checkins: CheckinRow[] = [];
 
     if (selectedDate) {
-      // 🛠️ FIX: Check against scheduled_date OR date(started_at)
       const [sessionRows] = await db.query<SessionRow[]>(
         `
         SELECT *
@@ -311,7 +285,6 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
         checkins = checkinRows;
       }
     } else {
-      // Fallback: Get the most recent session if no date provided
       const [semesterRows] = await db.query<any[]>(
         `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
       );
@@ -352,13 +325,7 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
   }
 });
 
-/**
- * POST /class/:class_id/activate-checkin
- * Starts a new attendance session for the class.
- * - Marks previous active sessions as expired.
- * - Calculates the correct 'scheduled_date' based on academic week.
- * - Emits a Socket.IO event to notify students instantly.
- */
+// Activate check-in for a class
 router.post("/class/:class_id/activate-checkin", async (req: Request, res: Response) => {
   const { class_id } = req.params;
 
@@ -367,7 +334,6 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     conn = await (db as any).getConnection();
     await conn.beginTransaction();
 
-    // 1. Expire any old pending sessions
     await conn.query(
       `UPDATE Session SET is_expired = 1 WHERE class_id = ? AND expires_at < NOW() AND is_expired = 0`,
       [class_id]
@@ -378,7 +344,6 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     );
     const semester = semesterRows[0];
 
-    // 2. Prevent double activation
     const [activeRows] = await conn.query(
       `SELECT session_id, started_at, expires_at, online_mode
       FROM Session
@@ -403,14 +368,12 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
       });
     }
 
-    // 3. Create new Session
     const startedAt = new Date();
-    const expiresAt = new Date(startedAt.getTime() + 30 * 60000); // 30 minutes duration
+    const expiresAt = new Date(startedAt.getTime() + 5 * 60000); 
 
     console.log("⏱️ [Activate] Server Time:", startedAt);
     console.log("⏱️ [Activate] Expires At:", expiresAt);
 
-    // Calculate Week Number & Scheduled Date
     const [semRows] = await db.query<SemesterRow[]>(
       `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`
     );
@@ -430,7 +393,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
     const scheduled = new Date(semesterStart);
     scheduled.setDate(semesterStart.getDate() + (weekNumber - 1) * 7 + dayIndex);
-    const scheduled_date = scheduled.toLocaleDateString('en-CA'); // YYYY-MM-DD format
+    const scheduled_date = scheduled.toLocaleDateString('en-CA');
 
     const { online_mode } = req.body;
     const isOnlineMode: boolean = online_mode === true;
@@ -446,7 +409,6 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
     await conn.commit();
     conn.release();
 
-    // 4. Notify Students via Socket.IO
     console.log(`🚀 [Activate] Emitting Socket to room: class_${class_id}`);
 
     io.to(`class_${class_id}`).emit("checkinActivated", {
@@ -479,10 +441,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
   }
 });
 
-/**
- * POST /session/:session_id/manual-checkin
- * Allows a lecturer to manually mark a student as present (overriding geolocation).
- */
+// Manually checking in a student
 router.post("/session/:session_id/manual-checkin", async (req: Request, res: Response) => {
   const { session_id } = req.params;
   const { student_id } = req.body;
@@ -528,7 +487,6 @@ router.post("/session/:session_id/manual-checkin", async (req: Request, res: Res
       [session_id, student_id]
     );
 
-    // Notify frontend to update UI instantly
     io.to(`class_${session.class_id}`).emit("studentCheckedIn", {
       class_id: session.class_id,
       student_id,
@@ -550,14 +508,8 @@ router.post("/session/:session_id/manual-checkin", async (req: Request, res: Res
 });
 
 // ============================================================================
-//                            ANALYTICS & EXPORTS
+// Lecturer analytics endpoint (Semester overview) - UPDATED DYNAMIC COUNT
 // ============================================================================
-
-/**
- * GET /:lecturer_id/analytics
- * Provides a dashboard overview of attendance rates for all classes taught by the lecturer.
- * Calculates status (Good/Warning/Critical) based on dynamic session counts.
- */
 router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
   const { lecturer_id } = req.params;
 
@@ -624,11 +576,11 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
         missedCount += missed;
       }
 
-      // 3) Attendance Rate Calculation
+      // 3) Attendance Rate
       const safeTotal = (presentCount + missedCount) === 0 ? 1 : (presentCount + missedCount);
       const attendanceRate =
         (presentCount + missedCount) === 0
-          ? 0
+          ? 0 // or 100 depending on preference for empty classes
           : Math.round((presentCount / safeTotal) * 100);
 
       let status: "good" | "warning" | "critical";
@@ -640,7 +592,7 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
         class_id: cls.class_id,
         class_name: cls.class_name,
         course_code: cls.course_code,
-        total_sessions: totalSessions,
+        total_sessions: totalSessions, // Dynamic Total
         present_count: presentCount,
         missed_count: missedCount,
         attendance_rate: attendanceRate,
@@ -660,10 +612,9 @@ router.get("/:lecturer_id/analytics", async (req: Request, res: Response) => {
   }
 });
 
-/**
- * GET /:lecturer_id/analytics/class/:class_id
- * Detailed analytics for a single class, including per-student performance.
- */
+// ============================================================================
+// Lecturer analytics endpoint (Per-class detailed) - UPDATED DYNAMIC COUNT
+// ============================================================================
 router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: Response) => {
   const { class_id } = req.params;
 
@@ -700,6 +651,7 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
       [class_id, semester.start_date, semester.end_date]
     );
 
+    // DYNAMIC TOTAL: derived from session length
     const totalSessions = sessions.length;
 
     const sessionDetails: any[] = [];
@@ -746,6 +698,7 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
 
     // Build Student List with Dynamic Rate Logic
     const studentList = Object.values(studentMap).map((s: any) => {
+      // Logic: Score = Total Sessions - Missed Sessions
       const safeTotal = totalSessions === 0 ? 1 : totalSessions;
       const attendanceRemaining = Math.max(0, totalSessions - s.missed_count);
       
@@ -768,7 +721,7 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
     return res.json({
       success: true,
       summary: {
-        total_sessions: totalSessions,
+        total_sessions: totalSessions, // Dynamic
         present_total: studentList.reduce((a, s) => a + s.present_count, 0),
         missed_total: studentList.reduce((a, s) => a + s.missed_count, 0),
       },
@@ -783,11 +736,7 @@ router.get("/:lecturer_id/analytics/class/:class_id", async (req: Request, res: 
   }
 });
 
-/**
- * GET /:lecturer_id/analytics/class/:class_id/export.csv
- * Generates a downloadable CSV report of attendance.
- * @query type - "students" (default) or "sessions"
- */
+// Export CSV (also updated)
 router.get("/:lecturer_id/analytics/class/:class_id/export.csv", async (req: Request, res: Response) => {
   const { class_id } = req.params;
   const type = (req.query.type as string) || "students";

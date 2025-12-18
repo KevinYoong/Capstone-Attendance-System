@@ -5,37 +5,23 @@ import { calculateCurrentWeek } from "../utils/semesterUtils";
 
 const router = Router();
 
-// ============================================================================
-//                                TYPES & INTERFACES
-// ============================================================================
-
-/**
- * Represents a Semester row from the database.
- * Note: MySQL returns BOOLEAN columns as TINYINT (0 or 1).
- */
+// TypeScript interface for Semester
+// Note: MySQL returns BOOLEAN as TINYINT (0 or 1)
 interface SemesterRow extends RowDataPacket {
   semester_id: number;
   name: string;
   start_date: string;
   end_date: string;
   current_week: number;
-  is_sem_break: number; // 0 = false, 1 = true
+  is_sem_break: number; // MySQL BOOLEAN returns 0 or 1
   status: "active" | "inactive";
   created_at: Date;
   updated_at: Date;
 }
 
-// ============================================================================
-//                                SEMESTER ROUTES
-// ============================================================================
-
 /**
  * GET /semester/current
- * Retrieves the currently active semester.
- * * * Features:
- * - Fetches the single semester marked as 'active'.
- * - Dynamically calculates the 'current_week' based on today's date vs start_date.
- * - Determines if the semester is currently on a break.
+ * Returns the currently active semester with week information
  */
 router.get("/current", async (req: Request, res: Response) => {
   try {
@@ -64,32 +50,36 @@ router.get("/current", async (req: Request, res: Response) => {
 
     const semester = rows[0];
 
-    // Calculate current week dynamically based on start_date
+    // Calculate current week from dates (automatic)
     const weekInfo = calculateCurrentWeek(semester.start_date);
 
-    return res.json({
+    const semesterData = {
+      semester_id: semester.semester_id,
+      name: semester.name,
+      start_date: semester.start_date,
+      end_date: semester.end_date,
+      current_week: weekInfo.current_week, // Calculated from dates
+      is_sem_break: weekInfo.is_sem_break, // Calculated from dates
+      status: semester.status
+    };
+
+    return res.status(200).json({
       success: true,
-      data: {
-        ...semester,
-        current_week: weekInfo.current_week,
-        is_sem_break: weekInfo.is_sem_break
-      }
+      data: semesterData
     });
-  } catch (err) {
-    console.error("Error fetching current semester:", err);
+
+  } catch (error) {
+    console.error("Error fetching current semester:", error);
     return res.status(500).json({
       success: false,
-      message: "Error fetching semester information"
+      message: "Error retrieving semester information"
     });
   }
 });
 
 /**
  * GET /semester/:semester_id
- * Retrieves details for a specific semester by ID.
- * * * Usage:
- * - Used by admin panels or history views to see details of past/future semesters.
- * - Also performs dynamic week calculation for consistency.
+ * Get a specific semester by ID
  */
 router.get("/:semester_id", async (req: Request, res: Response) => {
   const { semester_id } = req.params;
@@ -126,20 +116,21 @@ router.get("/:semester_id", async (req: Request, res: Response) => {
       name: semester.name,
       start_date: semester.start_date,
       end_date: semester.end_date,
-      current_week: weekInfo.current_week, 
-      is_sem_break: weekInfo.is_sem_break, 
+      current_week: weekInfo.current_week, // Calculated from dates
+      is_sem_break: weekInfo.is_sem_break, // Calculated from dates
       status: semester.status
     };
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       data: semesterData
     });
-  } catch (err) {
-    console.error("Error fetching semester details:", err);
+
+  } catch (error) {
+    console.error("Error fetching semester:", error);
     return res.status(500).json({
       success: false,
-      message: "Error fetching semester details"
+      message: "Error retrieving semester information"
     });
   }
 });

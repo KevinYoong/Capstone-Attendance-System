@@ -1,58 +1,31 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-/**
- * Express Middleware: verifyAdmin
- * * Protects routes that require Administrator privileges.
- * 1. Checks for the presence of the 'Authorization' header.
- * 2. Extracts and verifies the JWT token.
- * 3. Confirms the user's role is strictly 'admin'.
- */
 export function verifyAdmin(req: Request, res: Response, next: NextFunction) {
-  // 1. Retrieve the Authorization header
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
-    return res.status(401).json({ 
-      success: false, 
-      error: "Access Denied: Missing Authorization header" 
-    });
+    return res.status(401).json({ success: false, error: "Missing Authorization header" });
   }
 
-  // 2. Extract the token (Expected format: "Bearer <token>")
-  const token = authHeader.split(" ")[1];
+  const token = authHeader.split(" ")[1]; // "Bearer <token>"
 
   if (!token) {
-    return res.status(401).json({ 
-      success: false, 
-      error: "Access Denied: Invalid Authorization format" 
-    });
+    return res.status(401).json({ success: false, error: "Invalid Authorization header format" });
   }
 
   try {
-    // 3. Verify the token using the secret key
     const decoded = jwt.verify(token, process.env.JWT_SECRET!);
 
-    // 4. Check if the decoded token contains the 'admin' role
+    // decoded should contain { id, role }
     if (typeof decoded === "object" && decoded.role === "admin") {
-      // Attach the admin info to the request object for use in the controller
-      (req as any).admin = decoded; 
-      
-      // Proceed to the next middleware or route handler
+      (req as any).admin = decoded; // attach decoded admin to request
       return next();
     }
 
-    // If valid token but NOT admin (e.g., student/lecturer trying to access admin panel)
-    return res.status(403).json({ 
-      success: false, 
-      error: "Forbidden: Admin privileges required" 
-    });
+    return res.status(403).json({ success: false, error: "Admin access required" });
 
   } catch (err) {
-    // Token is invalid, expired, or tampered with
-    return res.status(401).json({ 
-      success: false, 
-      error: "Invalid or expired session token" 
-    });
+    return res.status(401).json({ success: false, error: "Invalid or expired token" });
   }
 }
