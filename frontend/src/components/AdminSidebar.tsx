@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 import {
   CalendarDays,
   Users,
@@ -8,8 +10,10 @@ import {
   ChevronRight,
   LogOut
 } from "lucide-react";
-import { NavLink, useNavigate } from "react-router-dom";
-import { useAuth } from "../context/AuthContext";
+
+// ============================================================================
+//                                TYPES & INTERFACES
+// ============================================================================
 
 interface SidebarItemProps {
   icon: React.ReactNode;
@@ -18,6 +22,16 @@ interface SidebarItemProps {
   collapsed: boolean;
 }
 
+// ============================================================================
+//                                HELPER COMPONENTS
+// ============================================================================
+
+/**
+ * SidebarItem
+ * Renders a single navigation link.
+ * * Highlights automatically when the route is active.
+ * * Hides the label when the sidebar is collapsed.
+ */
 function SidebarItem({ icon, label, to, collapsed }: SidebarItemProps) {
   return (
     <NavLink
@@ -33,6 +47,18 @@ function SidebarItem({ icon, label, to, collapsed }: SidebarItemProps) {
   );
 }
 
+// ============================================================================
+//                                MAIN COMPONENT
+// ============================================================================
+
+/**
+ * AdminSidebar
+ * The main navigation drawer for the Admin Dashboard.
+ * * Features:
+ * - Collapsible state (Expand/Shrink).
+ * - Navigation links to Semesters, Students, Lecturers, Classes.
+ * - Logout functionality at the bottom.
+ */
 export default function AdminSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const { logout } = useAuth();
@@ -44,30 +70,27 @@ export default function AdminSidebar() {
   };
 
   return (
-    <div
-      className={`min-h-screen bg-[#0d1b2a] border-r border-white/10 transition-all duration-300 flex flex-col
-        ${collapsed ? "w-20" : "w-64"}
-      `}
+    <aside
+      className={`h-screen bg-[#181818] border-r border-white/10 flex flex-col transition-all duration-300 ${
+        collapsed ? "w-20" : "w-64"
+      }`}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-5 border-b border-white/10">
+      {/* Header / Logo Area */}
+      <div className="p-4 flex items-center justify-between border-b border-white/10">
         {!collapsed && (
-          <h1 className="text-xl font-bold text-white">Admin Panel</h1>
+          <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+            Admin
+          </h1>
         )}
-
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="p-2 hover:bg-white/10 rounded-lg transition"
+          className="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition"
         >
-          {collapsed ? (
-            <ChevronRight className="text-white" />
-          ) : (
-            <ChevronLeft className="text-white" />
-          )}
+          {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
         </button>
       </div>
 
-      {/* Menu Items */}
+      {/* Navigation Links */}
       <nav className="flex flex-col gap-1 mt-6 px-2 flex-1">
         <SidebarItem
           icon={<CalendarDays />}
@@ -99,8 +122,7 @@ export default function AdminSidebar() {
       <div className="p-2 border-t border-white/10 mb-2 mx-2">
         <button
           onClick={handleLogout}
-          // REMOVED: ${collapsed ? "justify-center" : ""} 
-          // Now it aligns exactly like SidebarItem (flex default is left)
+          // Note: Kept flex alignment consistent with SidebarItems
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors
             text-red-400 hover:bg-red-500/10 hover:text-red-300`}
           title="Logout"
@@ -109,10 +131,9 @@ export default function AdminSidebar() {
             <LogOut />
           </div>
           
-          {/* Using a simple condition here matches your SidebarItem logic */}
-          {!collapsed && <span className="text-sm font-medium">Logout</span>}
+          {!collapsed && <span className="text-sm font-medium">Log Out</span>}
         </button>
       </div>
-    </div>
+    </aside>
   );
 }
