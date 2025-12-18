@@ -2,6 +2,7 @@ import { useState, FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { loginUser } from "../services/api";
 import { useAuth } from "../context/AuthContext";
+import { AlertCircle } from "lucide-react"; // Optional icon for better UX
 
 export default function LoginForm() {
   const [identifier, setIdentifier] = useState("");
@@ -20,18 +21,17 @@ export default function LoginForm() {
     try {
       const response = await loginUser({ identifier, password });
 
-      // If backend returned a token (admin), pass it to login()
       if (response.token && response.user.role === "admin") {
         login(response.user as any, response.token);
       } else {
         login(response.user as any);
       }
 
-      // Navigate based on role
       if (response.user.role === "student") navigate("/student");
       else if (response.user.role === "lecturer") navigate("/lecturer");
       else if (response.user.role === "admin") navigate("/admin/semesters");
     } catch (err: any) {
+      // This sets the error message state
       setError(err.response?.data?.message || "Invalid login credentials");
     } finally {
       setIsLoading(false);
@@ -40,6 +40,15 @@ export default function LoginForm() {
 
   return (
     <form onSubmit={handleLogin} className="space-y-5 text-white">
+      
+      {/* 🔴 NEW: Error Message Popup */}
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/50 text-red-400 p-3 rounded-lg flex items-center gap-2 text-sm animate-in fade-in slide-in-from-top-1">
+          <AlertCircle size={16} />
+          <span>{error}</span>
+        </div>
+      )}
+
       <div>
         <label className="block text-sm mb-1 text-gray-300">
           Student ID / Email
@@ -68,9 +77,14 @@ export default function LoginForm() {
 
       <button
         type="submit"
-        className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-500 transition text-white font-medium"
+        disabled={isLoading}
+        className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:cursor-not-allowed transition text-white font-medium flex justify-center items-center"
       >
-        Sign In
+        {isLoading ? (
+          <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+        ) : (
+          "Sign In"
+        )}
       </button>
 
       <p className="text-center text-sm text-gray-400">
