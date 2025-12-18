@@ -15,14 +15,14 @@ This project is a Geolocation-based Attendance System built with a React fronten
 1. Open the /server folder in your terminal.
 2. Install dependencies: npm install
 3. Create a .env file in the root of the /server directory and add the following:
-    PORT=3001
-    DB_HOST=localhost
-    DB_USER=root
-    DB_PASSWORD=your_mysql_password
-    DB_NAME=attendance_system
-    JWT_SECRET=supersecretkey123
-    JWT_EXPIRES_IN=1d
-4. Start the backend application: npm run dev
+   PORT=3001
+   DB_HOST=localhost
+   DB_USER=root
+   DB_PASSWORD=your_mysql_password
+   DB_NAME=attendance_system
+   JWT_SECRET=supersecretkey123
+   JWT_EXPIRES_IN=1d
+5. Start the backend application: npm run dev
 
 ## 3. Frontend Configuration (Client)
 1. Open the root folder (or /client) in a new terminal.
