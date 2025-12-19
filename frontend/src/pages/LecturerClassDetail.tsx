@@ -3,6 +3,10 @@ import { useEffect, useState, useCallback } from "react";
 import axios from "axios";
 import socket from "../utils/socket";
 
+// ==========================================
+// Types & Interfaces
+// ==========================================
+
 interface Student {
   student_id: number;
   name: string;
@@ -29,25 +33,40 @@ interface Session {
   is_expired?: boolean;
 }
 
+interface CheckinRecord {
+  student_id: number;
+  status: string;
+}
+
+// ==========================================
+// Component: LecturerClassDetail
+// ==========================================
+
 export default function LecturerClassDetail() {
   const { class_id } = useParams<{ class_id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Navigation state restoration props
   const fromWeek = location.state?.fromWeek;
   const fromSemBreak = location.state?.fromSemBreak;
   const sessionDate = location.state?.sessionDate;
+
+  // State Management
   const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [students, setStudents] = useState<Student[]>([]);
   const [loading, setLoading] = useState(true);
-  const now = new Date();
-  const hasPreviousSession =
-    session && new Date(session.started_at) < new Date();
-  const isActiveSession =
-    session &&
-    !session.is_expired &&
-    new Date(session.expires_at) > new Date();
+  const [onlineMode, setOnlineMode] = useState<boolean>(false);
 
+  // Helper Booleans
+  const now = new Date();
+  const hasPreviousSession = session && new Date(session.started_at) < now;
+  const isActiveSession = session && !session.is_expired && new Date(session.expires_at) > now;
+
+  // ------------------------------------------
+  // Navigation Handler
+  // ------------------------------------------
   const handleBack = () => {
     navigate('/lecturer', {
       state: {
@@ -57,6 +76,9 @@ export default function LecturerClassDetail() {
     });
   };
 
+  // ------------------------------------------
+  // Data Fetching
+  // ------------------------------------------
   const fetchDetails = useCallback(async (forceIgnoreDate = false) => {
     if (!class_id) return;
     try {
@@ -88,14 +110,15 @@ export default function LecturerClassDetail() {
         setOnlineMode(rawSession.online_mode === true);
       }
 
+      // Map check-in statuses to students
       const checkins = res.data.checkins || [];
-      const checkinMap = new Map(checkins.map((c: any) => [c.student_id, c.status]));
+      const checkinMap = new Map<number, string>(
+        checkins.map((c: CheckinRecord) => [c.student_id, c.status])
+      );
 
       setStudents(
         (res.data.students || []).map((s: any) => {
-          // Get the actual status from the checkin record (not just whether it exists)
           const checkinStatus = checkinMap.get(s.student_id);
-
           let status: "checked-in" | "missed" | "pending" = "pending";
 
           if (checkinStatus === "checked-in" || checkinStatus === "present") {
@@ -120,23 +143,25 @@ export default function LecturerClassDetail() {
     }
   }, [class_id, sessionDate]);
 
-  // initial fetch
+  // Initial Fetch
   useEffect(() => {
-  fetchDetails();
+    fetchDetails();
   }, [fetchDetails]);
 
-  // Join lecturer room and listen for session events
+  // ------------------------------------------
+  // Socket.IO Logic
+  // ------------------------------------------
   useEffect(() => {
     if (!class_id) return;
 
     const id = Number(class_id);
     socket.emit("joinLecturerRoom", id);
 
+    // Event: Session Expired
     const onSessionExpired = async (data: any) => {
       if (data.class_id !== id) return;
       console.log("🔴 Session expired for this class", data);
 
-      // Optimistically set session null and mark pending->missed
       setSession(null);
       setStudents((prev) =>
         prev.map((s) => ({
@@ -145,27 +170,24 @@ export default function LecturerClassDetail() {
         }))
       );
 
-      // Refresh details from backend to ensure authoritative state
       try {
-      await fetchDetails();
-      } catch (e) {
-      // swallow - fetchDetails already logs
-      }
+        await fetchDetails();
+      } catch (e) { /* silent fail */ }
     };
 
+    // Event: Student Checked In
     const onStudentCheckedIn = (data: any) => {
       if (data.class_id !== id) return;
-      setStudents((prev) => prev.map((s) => (s.student_id === data.student_id ? { ...s, status: "checked-in" } : s)));
+      setStudents((prev) => 
+        prev.map((s) => (s.student_id === data.student_id ? { ...s, status: "checked-in" } : s))
+      );
     };
 
-    socket.on("sessionExpired", onSessionExpired);
-    socket.on("studentCheckedIn", onStudentCheckedIn);
-
+    // Event: Session Activated (e.g., from another tab)
     const onCheckinActivated = async (data: any) => {
       if (data.class_id !== id) return;
       console.log("🟡 Session activated:", data);
 
-      // Update session state
       setSession({
         session_id: data.session_id,
         started_at: data.startedAt,
@@ -174,12 +196,12 @@ export default function LecturerClassDetail() {
         is_expired: false,
       });
 
-      // Refresh page details
       await fetchDetails(true);
     };
 
+    socket.on("sessionExpired", onSessionExpired);
+    socket.on("studentCheckedIn", onStudentCheckedIn);
     socket.on("checkinActivated", onCheckinActivated);
-
 
     return () => {
       socket.off("sessionExpired", onSessionExpired);
@@ -189,30 +211,33 @@ export default function LecturerClassDetail() {
     };
   }, [class_id, fetchDetails]);
 
+  // ------------------------------------------
+  // Action Handlers
+  // ------------------------------------------
+
+  // Activate Check-in (Start Session)
   const handleActivateCheckIn = async () => {
     if (!class_id) return;
     try {
-    const res = await axios.post(`http://localhost:3001/lecturer/class/${class_id}/activate-checkin`, {
+      const res = await axios.post(`http://localhost:3001/lecturer/class/${class_id}/activate-checkin`, {
         online_mode: onlineMode,
       });
 
-    setSession({
-      session_id: Number(res.data.session_id),
-      started_at: res.data.started_at,
-      expires_at: res.data.expires_at,
-      online_mode: !!res.data.online_mode,
-      is_expired: !!res.data.is_expired,
-    });
+      setSession({
+        session_id: Number(res.data.session_id),
+        started_at: res.data.started_at,
+        expires_at: res.data.expires_at,
+        online_mode: !!res.data.online_mode,
+        is_expired: !!res.data.is_expired,
+      });
 
-    // Immediately refresh to ensure checkins and students reflect latest state
-    await fetchDetails(true);
+      await fetchDetails(true);
     } catch (err) {
-    console.error("Error activating check-in:", err);
+      console.error("Error activating check-in:", err);
     }
   };
 
-  const [onlineMode, setOnlineMode] = useState<boolean>(false);
-
+  // Manual Check-in (Lecturer overrides status)
   const handleManualCheckIn = async (studentId: number) => {
     if (!session) return;
     try {
@@ -220,7 +245,6 @@ export default function LecturerClassDetail() {
         student_id: studentId
       });
 
-      // Optimistically update UI
       setStudents(prev =>
         prev.map(s =>
           s.student_id === studentId
@@ -234,14 +258,21 @@ export default function LecturerClassDetail() {
     }
   };
 
+  // ------------------------------------------
+  // Main Render
+  // ------------------------------------------
+
   if (loading) return <p className="text-white p-8">Loading...</p>;
 
   return (
     <div className="min-h-screen text-white p-8 bg-gradient-to-br from-[#0a0f1f] via-[#0d1b2a] to-[#051923]">
+      
+      {/* Back Button */}
       <button onClick={handleBack} className="mb-4 px-4 py-2 bg-gray-600 rounded hover:bg-gray-500">
         ← Back
       </button>
 
+      {/* --- Class Details & Controls --- */}
       <div className="bg-[#181818]/80 p-6 rounded-2xl border border-white/10 mb-6">
         <h1 className="text-2xl font-bold mb-2">{classInfo?.class_name}</h1>
         <p>Course Code: {classInfo?.course_code}</p>
@@ -252,6 +283,7 @@ export default function LecturerClassDetail() {
         </p>
         <p>Lecturer: {classInfo?.lecturer_name}</p>
 
+        {/* Online Mode Toggle */}
         <div className="flex items-center gap-3 mt-3">
           <label className="font-semibold">Online Mode</label>
           <input 
@@ -264,8 +296,9 @@ export default function LecturerClassDetail() {
           </span>
         </div>
 
+        {/* Session Status Section */}
         <div className="mt-4">
-          {/* 🟡 ACTIVE SESSION */}
+          {/* Active Session Status */}
           {isActiveSession && (
             <p className="text-yellow-400 font-semibold">
               🟡 Active until {new Date(session!.expires_at).toLocaleTimeString()} 
@@ -274,7 +307,7 @@ export default function LecturerClassDetail() {
             </p>
           )}
 
-          {/* 🔵 PREVIOUSLY ACTIVATED (expired session) */}
+          {/* Past Session Status */}
           {!isActiveSession && hasPreviousSession && (
             <div className="text-blue-400 font-semibold">
               🔵 Previously Activated
@@ -283,7 +316,7 @@ export default function LecturerClassDetail() {
             </div>
           )}
 
-          {/* 🟢 ACTIVATE CHECK-IN (only if never activated before) */}
+          {/* Activate Button (Only if no session exists) */}
           {!isActiveSession && !hasPreviousSession && (
             <button
               onClick={handleActivateCheckIn}
@@ -295,18 +328,19 @@ export default function LecturerClassDetail() {
         </div>
       </div>
 
+      {/* --- Student List --- */}
       <div className="bg-[#1a1a1f]/80 p-4 rounded-2xl border border-white/10">
         <h2 className="text-xl font-semibold mb-4">Students</h2>
         {students.length === 0 ? (
           <p>No students enrolled.</p>
         ) : (
           <>
-            {/* Checked In Group */}
+            {/* 1. Checked In Students */}
             {students
               .filter(s => s.status === "checked-in")
               .sort((a, b) => a.name.localeCompare(b.name))
               .map(s => (
-                <div key={s.student_id} className="flex justify-between px-4 py-2 bg-[#22222a] rounded-md">
+                <div key={s.student_id} className="flex justify-between px-4 py-2 bg-[#22222a] rounded-md mb-2">
                   <div>
                     <p className="font-semibold">{s.name}</p>
                     <p className="text-gray-400">{s.email}</p>
@@ -315,12 +349,12 @@ export default function LecturerClassDetail() {
                 </div>
               ))}
 
-            {/* Pending Group */}
+            {/* 2. Pending Students */}
             {students
               .filter(s => s.status === "pending")
               .sort((a, b) => a.name.localeCompare(b.name))
               .map(s => (
-                <div key={s.student_id} className="flex justify-between px-4 py-2 bg-[#22222a] rounded-md">
+                <div key={s.student_id} className="flex justify-between px-4 py-2 bg-[#22222a] rounded-md mb-2">
                   <div>
                     <p className="font-semibold">{s.name}</p>
                     <p className="text-gray-400">{s.email}</p>
@@ -334,12 +368,12 @@ export default function LecturerClassDetail() {
                 </div>
               ))}
 
-            {/* Missed Group */}
+            {/* 3. Missed Students */}
             {students
               .filter(s => s.status === "missed")
               .sort((a, b) => a.name.localeCompare(b.name))
               .map(s => (
-                <div key={s.student_id} className="flex justify-between px-4 py-2 bg-[#22222a] rounded-md">
+                <div key={s.student_id} className="flex justify-between px-4 py-2 bg-[#22222a] rounded-md mb-2">
                   <div>
                     <p className="font-semibold">{s.name}</p>
                     <p className="text-gray-400">{s.email}</p>

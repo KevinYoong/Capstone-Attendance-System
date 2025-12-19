@@ -1,8 +1,12 @@
-import { useAuth } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
 import { useCallback, useEffect, useState } from 'react';
-import socket from '../utils/socket';
+import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { useAuth } from '../context/AuthContext';
+import socket from '../utils/socket';
+
+// ==========================================
+// Types & Interfaces
+// ==========================================
 
 interface Class {
   class_id: number;
@@ -34,7 +38,21 @@ interface Semester {
   status: string;
 }
 
-// Compute academic week based on semester start date and today's date
+interface ActiveSession {
+  session_id: number;
+  startedAt: string;
+  expiresAt: string;
+  onlineMode: boolean;
+  scheduled_date: string;
+}
+
+// ==========================================
+// Helper Functions
+// ==========================================
+
+/**
+ * Calculates the current academic week (1-14) based on the semester start date.
+ */
 function getCurrentAcademicWeek(startDateStr: string): number {
   const startDate = new Date(startDateStr);
   const today = new Date();
@@ -44,52 +62,47 @@ function getCurrentAcademicWeek(startDateStr: string): number {
   today.setHours(0, 0, 0, 0);
 
   const diffDays = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
-
-  // Week 1 = days 0–6 → week = 1 + (days / 7)
   const week = Math.floor(diffDays / 7) + 1;
 
   // Clamp range 1–14
   return Math.max(1, Math.min(14, week));
 }
 
+// ==========================================
+// Component: StudentDashboard
+// ==========================================
+
 export default function StudentDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
+  // ------------------------------------------
+  // State Management
+  // ------------------------------------------
+  
+  // Schedule & Navigation
   const [weekSchedule, setWeekSchedule] = useState<Week>({
-    Monday: [],
-    Tuesday: [],
-    Wednesday: [],
-    Thursday: [],
-    Friday: [],
+    Monday: [], Tuesday: [], Wednesday: [], Thursday: [], Friday: [],
   });
-  const [openDays, setOpenDays] = useState<string[]>([]);
-
-  // Track which class is currently processing a check-in (loading state)
-  const [checkingInClassId, setCheckingInClassId] = useState<number | null>(null);
-
-  const [activeSessions, setActiveSessions] = useState<Record<number, {
-    session_id: number;
-    startedAt: string;
-    expiresAt: string;
-    onlineMode: boolean;
-    scheduled_date: string;
-  }>>({});
-
-  // Semester and week navigation state
   const [semester, setSemester] = useState<Semester | null>(null);
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
   const [loadingSemester, setLoadingSemester] = useState<boolean>(true);
   const [isViewingSemBreak, setIsViewingSemBreak] = useState<boolean>(false);
+  
+  // UI State
+  const [openDays, setOpenDays] = useState<string[]>([]);
+  const [checkingInClassId, setCheckingInClassId] = useState<number | null>(null);
 
-  // Store full semester attendance history
+  // Session & Attendance Data
+  const [activeSessions, setActiveSessions] = useState<Record<number, ActiveSession>>({});
   const [attendanceSessions, setAttendanceSessions] = useState<any[]>([]);
   const [attendanceSummaryByClass, setAttendanceSummaryByClass] = useState<Record<number, any>>({});
 
-  const handleLogout = () => {
-    logout();
-    navigate('/');
-  };
+  // ------------------------------------------
+  // API Fetching Utilities
+  // ------------------------------------------
 
+  // Fetch the weekly class schedule
   const fetchSchedule = useCallback(async (week?: number) => {
     try {
       const weekParam = week || selectedWeek;
@@ -110,17 +123,11 @@ export default function StudentDashboard() {
       setWeekSchedule(schedule);
     } catch (err) {
       console.error("Error fetching schedule:", err);
-      setWeekSchedule({
-        Monday: [],
-        Tuesday: [],
-        Wednesday: [],
-        Thursday: [],
-        Friday: [],
-      });
+      setWeekSchedule({ Monday: [], Tuesday: [], Wednesday: [], Thursday: [], Friday: [] });
     }
   }, [user?.id, selectedWeek, isViewingSemBreak]);
 
-  // Fetch active sessions for the logged-in student
+  // Fetch currently active sessions (yellow status)
   const fetchActiveSessions = useCallback(async () => {
     if (!user?.id) return;
     try {
@@ -130,7 +137,7 @@ export default function StudentDashboard() {
 
       if (!res.data?.success) return;
 
-      const map: Record<number, any> = {};
+      const map: Record<number, ActiveSession> = {};
       res.data.sessions.forEach((s: any) => {
         map[s.class_id] = {
           session_id: s.session_id,
@@ -149,6 +156,7 @@ export default function StudentDashboard() {
     }
   }, [user?.id]);
 
+  // Fetch attendance history for the semester
   const fetchAttendanceSemester = useCallback(async () => {
     if (!user?.id || !semester) return;
 
@@ -175,9 +183,11 @@ export default function StudentDashboard() {
     }
   }, [user?.id, semester]);
 
-  // ---------------------------------------------------------
-  // 1. INITIAL SETUP (Runs ONCE on mount/login)
-  // ---------------------------------------------------------
+  // ------------------------------------------
+  // Effects: Data Loading & Sockets
+  // ------------------------------------------
+
+  // 1. Initial Data Load & Socket Setup
   useEffect(() => {
     if (!user) return;
 
@@ -193,10 +203,7 @@ export default function StudentDashboard() {
         if (res.data.success) {
           const sem = res.data.data;
           const computedWeek = getCurrentAcademicWeek(sem.start_date);
-          setSemester({
-            ...sem,
-            current_week: computedWeek
-          });
+          setSemester({ ...sem, current_week: computedWeek });
           setSelectedWeek(computedWeek);
         }
       } catch (err) {
@@ -212,16 +219,12 @@ export default function StudentDashboard() {
     return () => {
       socket.emit("leaveStudentRooms", user.id);
     };
-    // ⚠️ DEPENDENCIES: Removed fetchAttendanceSemester to stop the loop
   }, [user?.id, fetchActiveSessions]);
 
-  // ---------------------------------------------------------
-  // 2. SOCKET LISTENERS (Updates when dependencies change)
-  // ---------------------------------------------------------
+  // 2. Socket Event Listeners
   useEffect(() => {
     if (!user) return;
 
-    // Defined here so they close over the latest state/functions
     const onCheckinActivated = (data: any) => {
       const onlineMode = data.online_mode ?? data.onlineMode ?? false;
       setActiveSessions((prev) => ({
@@ -255,7 +258,6 @@ export default function StudentDashboard() {
         delete copy[data.class_id];
         return copy;
       });
-
       fetchAttendanceSemester();
     };
 
@@ -270,30 +272,35 @@ export default function StudentDashboard() {
     };
   }, [user?.id, fetchAttendanceSemester]);
 
-  // ---------------------------------------------------------
-  // 3. Fetch Attendance when Semester is Ready
-  // ---------------------------------------------------------
+  // 3. Load attendance once semester is set
   useEffect(() => {
     if (user && semester) {
         fetchAttendanceSemester();
     }
   }, [user, semester, fetchAttendanceSemester]);
 
-  // ---------------------------------------------------------
-  // 4. Fetch Schedule when Week Changes
-  // ---------------------------------------------------------
+  // 4. Update schedule when navigation changes
   useEffect(() => {
     if (!user || !semester) return;
     fetchSchedule();
   }, [selectedWeek, user, semester, isViewingSemBreak, fetchSchedule]);
 
-  // Auto-open today's accordion
+  // 5. Auto-expand today's schedule on load
   useEffect(() => {
     const today = new Date().toLocaleDateString('en-US', { weekday: 'long' });
     if (Object.keys(weekSchedule).includes(today)) {
       setOpenDays([today]);
     }
   }, [weekSchedule]);
+
+  // ------------------------------------------
+  // Helper Handlers
+  // ------------------------------------------
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+  };
 
   const toggleDay = (day: string) => {
     if (openDays.includes(day)) {
@@ -303,6 +310,7 @@ export default function StudentDashboard() {
     }
   };
 
+  // Week Navigation Logic
   const handlePreviousWeek = () => {
     if (isViewingSemBreak) {
       setIsViewingSemBreak(false);
@@ -332,7 +340,7 @@ export default function StudentDashboard() {
     }
   };
 
-  // Helper to get Date Object for a day in the selected week
+  // Date Calculation Helper
   const getDateObjForDay = (dayName: string): Date | null => {
     if (!semester) return null;
     const dayIndex = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4 }[dayName] ?? 0;
@@ -347,11 +355,13 @@ export default function StudentDashboard() {
     return date ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
   };
 
+  // ------------------------------------------
+  // Check-In Logic
+  // ------------------------------------------
+
   const handleCheckIn = async (classId: number) => {
     if (!user) return;
-
-    // Prevent checking in if already in progress for ANY class
-    if (checkingInClassId !== null) return;
+    if (checkingInClassId !== null) return; // Prevent double clicks
 
     const session = activeSessions[classId];
     if (!session) {
@@ -380,7 +390,7 @@ export default function StudentDashboard() {
           });
 
           if (response.data.success) {
-             // Optimistic update
+             // Optimistic Update UI
              setAttendanceSessions(prev => {
                  const exists = prev.find(s => s.session_id === session.session_id);
                  if (exists) {
@@ -412,9 +422,15 @@ export default function StudentDashboard() {
     );
   };
 
+  // ------------------------------------------
+  // Main Render
+  // ------------------------------------------
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#0a0f1f] via-[#0d1b2a] to-[#051923] text-white p-8">
       <div className="max-w-4xl mx-auto">
+        
+        {/* --- Header --- */}
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold">Student Dashboard</h1>
           <div className="flex items-center gap-4">
@@ -433,12 +449,13 @@ export default function StudentDashboard() {
           </div>
         </div>
 
+        {/* --- Welcome Card --- */}
         <div className="bg-[#181818]/80 backdrop-blur-xl p-6 rounded-2xl border border-white/10 mb-6">
           <h2 className="text-xl mb-2">Welcome, {user?.name}!</h2>
           <p className="text-gray-400">Student ID: {user?.id}</p>
         </div>
 
-        {/* Semester & Week Navigation */}
+        {/* --- Semester & Week Navigation --- */}
         {loadingSemester ? (
           <div className="bg-[#181818]/80 backdrop-blur-xl p-6 rounded-2xl border border-white/10 mb-6 text-center">
             <p className="text-gray-400">Loading semester information...</p>
@@ -499,7 +516,7 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* Weekly Schedule */}
+        {/* --- Weekly Schedule --- */}
         <div className="space-y-4">
           {Object.entries(weekSchedule).map(([day, classes]) => (
             <div
@@ -525,6 +542,7 @@ export default function StudentDashboard() {
                     const rowDateObj = getDateObjForDay(day);
                     const rowIsoDate = rowDateObj ? rowDateObj.toLocaleDateString('en-CA') : "";
 
+                    // Find if check-in exists for this class on this day
                     const sessionForThisWeek = attendanceSessions.find((s) => {
                         if (s.class_id !== cls.class_id) return false;
                         if (s.scheduled_date) {
@@ -536,12 +554,11 @@ export default function StudentDashboard() {
 
                     const isCheckedIn = sessionForThisWeek?.student_status === "present" || 
                                         sessionForThisWeek?.student_status === "checked-in";
-
                     const isMissed = sessionForThisWeek?.student_status === "missed";
 
+                    // Determine if check-in is currently active
                     let isActive = false;
                     const active = activeSessions[cls.class_id];
-                    
                     if (active && rowDateObj) {
                         const rowIsoDate = rowDateObj.toLocaleDateString('en-CA'); 
                         if (active.scheduled_date === rowIsoDate && !isCheckedIn && !isMissed) {
@@ -550,8 +567,6 @@ export default function StudentDashboard() {
                     }
 
                     const analytics = attendanceSummaryByClass[cls.class_id];
-
-                    // Check if THIS class is the one currently checking in
                     const isProcessing = checkingInClassId === cls.class_id;
 
                     return (
@@ -606,7 +621,6 @@ export default function StudentDashboard() {
 
                         <button
                           onClick={() => handleCheckIn(cls.class_id)}
-                          // DISABLE if processing this class, OR if processing ANY class (optional), OR valid states
                           disabled={!isActive || isCheckedIn || isMissed || isProcessing || checkingInClassId !== null}
                           className={`w-full md:w-auto px-6 py-2 rounded-lg transition font-medium shadow-lg
                             ${isCheckedIn
