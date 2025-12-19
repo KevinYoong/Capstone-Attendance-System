@@ -1,40 +1,61 @@
-import express, { Request, Response } from 'express';
-import db from "./db";
-import mysql, { RowDataPacket } from "mysql2/promise";
-import cors from 'cors';
-import dotenv from 'dotenv';
+import express, { Request, Response } from "express";
+import http from "http";
+import cors from "cors";
+import dotenv from "dotenv";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import http from "http";          
-import { Server } from "socket.io"; 
+import { Server } from "socket.io";
+import { RowDataPacket } from "mysql2";
+
+// Database Connection
+import db from "./db";
+
+// Route Imports
 import studentRoutes from "./src/routes/studentRoutes";
 import lecturerRoutes from "./src/routes/lecturerRoutes";
 import semesterRoutes from "./src/routes/semesterRoutes";
 import adminRoutes from "./src/routes/adminRoutes";
+
+// Middleware
 import { verifyAdmin } from "./src/middleware/verifyAdmin";
 
+// Configuration
 dotenv.config();
-
 const app = express();
-const port = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3001;
+
+// ============================================================================
+//                            SERVER & SOCKET SETUP
+// ============================================================================
+
 const server = http.createServer(app);
+
 export const io: Server = new Server(server, {
   cors: {
-    origin: "*",
+    origin: "*", // Allow all origins for development
     methods: ["GET", "POST"],
   },
 });
 
 app.use(cors());
 app.use(express.json());
+
+// ============================================================================
+//                            API ROUTES
+// ============================================================================
+
 app.use("/student", studentRoutes);
 app.use("/lecturer", lecturerRoutes);
 app.use("/semester", semesterRoutes);
-app.use("/admin", verifyAdmin, adminRoutes); 
+// Protect Admin routes with middleware
+app.use("/admin", verifyAdmin, adminRoutes);
 
-// Handle socket connections
+// ============================================================================
+//                            SOCKET.IO HANDLERS
+// ============================================================================
+
 io.on("connection", (socket) => {
-  console.log("🟢 Client connected:", socket.id);
+  console.log("🟢 [Socket] Client connected:", socket.id);
 
   // Student joins all class rooms they belong to
   socket.on("joinStudentRooms", async (studentId: number) => {
@@ -65,10 +86,13 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log("🔴 Client disconnected:", socket.id);
+    console.log("🔴 [Socket] Client disconnected:", socket.id);
   });
 });
 
+// ============================================================================
+//                            AUTH TYPES
+// ============================================================================
 
 interface LoginRequestBody {
   identifier: string;
@@ -80,7 +104,6 @@ interface Student extends RowDataPacket {
   name: string;
   email: string;
   password: string;
-  phone_number?: string;
   created_at: string;
 }
 
@@ -89,7 +112,6 @@ interface Lecturer extends RowDataPacket {
   name: string;
   email: string;
   password: string;
-  phone_number?: string;
   created_at: string;
 }
 
@@ -102,20 +124,36 @@ interface Admin extends RowDataPacket {
 
 type User = Student | Lecturer | Admin;
 
+// ============================================================================
+//                            AUTH ENDPOINTS
+// ============================================================================
+
+/**
+ * POST /create-admin
+ * Helper route to create the initial admin account.
+ */
 app.post("/create-admin", async (req: Request, res: Response) => {
-  const { name, email, password } = req.body;
+  try {
+    const { name, email, password } = req.body;
+    const hashed = await bcrypt.hash(password, 10);
 
-  const hashed = await bcrypt.hash(password, 10);
+    await db.query(
+      "INSERT INTO Admin (name, email, password) VALUES (?, ?, ?)",
+      [name, email, hashed]
+    );
 
-  await db.query(
-    "INSERT INTO Admin (name, email, password) VALUES (?, ?, ?)",
-    [name, email, hashed]
-  );
-
-  res.json({ success: true, message: "Admin created" });
+    res.json({ success: true, message: "Admin created successfully" });
+  } catch (err) {
+    console.error("Create Admin Error:", err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
 });
 
-app.post("/login", async (req: Request, res: Response) => {
+/**
+ * POST /login
+ * Handles login for Admin, Lecturer, and Student based on identifier (ID or Email).
+ */
+ app.post("/login", async (req: Request, res: Response) => {
   const { identifier, password } = req.body as LoginRequestBody;
 
   try {
@@ -123,10 +161,10 @@ app.post("/login", async (req: Request, res: Response) => {
     let user: User | undefined;
     let role: "student" | "lecturer" | "admin" | undefined;
 
-    // Admin login
+    // 1. Check Admin (Email only)
     if (isEmail) {
       const [adminMatch] = await db.query<Admin[]>(
-        "SELECT * FROM Admin WHERE email = ?",
+        "SELECT * FROM Admin WHERE email = ? LIMIT 1",
         [identifier]
       );
 
@@ -136,33 +174,24 @@ app.post("/login", async (req: Request, res: Response) => {
       }
     }
 
-    // Student login
+    // 2. Check Student (ID or Email)
     if (!user) {
-      if (isEmail) {
-        const [studentMatch] = await db.query<Student[]>(
-          "SELECT * FROM Student WHERE email = ?",
-          [identifier]
-        );
-        if (studentMatch.length > 0) {
-          user = studentMatch[0];
-          role = "student";
-        }
-      } else {
-        const [studentMatch] = await db.query<Student[]>(
-          "SELECT * FROM Student WHERE student_id = ?",
-          [identifier]
-        );
-        if (studentMatch.length > 0) {
-          user = studentMatch[0];
-          role = "student";
-        }
+      const query = isEmail
+        ? "SELECT * FROM Student WHERE email = ? LIMIT 1"
+        : "SELECT * FROM Student WHERE student_id = ? LIMIT 1";
+
+      const [studentMatch] = await db.query<Student[]>(query, [identifier]);
+
+      if (studentMatch.length > 0) {
+        user = studentMatch[0];
+        role = "student";
       }
     }
 
-    // Lecturer login
+    // 3. Check Lecturer (Email only)
     if (!user && isEmail) {
       const [lecturerMatch] = await db.query<Lecturer[]>(
-        "SELECT * FROM Lecturer WHERE email = ?",
+        "SELECT * FROM Lecturer WHERE email = ? LIMIT 1",
         [identifier]
       );
       if (lecturerMatch.length > 0) {
@@ -171,43 +200,39 @@ app.post("/login", async (req: Request, res: Response) => {
       }
     }
 
+    // 4. Validate User Found
     if (!user) {
       return res.status(401).json({ message: "User not found." });
     }
 
+    // 5. Validate Password
     const passwordMatch = await bcrypt.compare(password, user.password);
     if (!passwordMatch) {
       return res.status(401).json({ message: "Incorrect password." });
     }
 
-    // === ADMIN LOGIN WITH JWT ===
-    if (role === "admin") {
-      const token = jwt.sign(
-        { id: (user as Admin).admin_id, role: "admin" },
-        process.env.JWT_SECRET as string,
-        { expiresIn: process.env.JWT_EXPIRES_IN || "1d" } as jwt.SignOptions
-      );
-
-      return res.status(200).json({
-        message: "Login successful.",
-        user: {
-          id: (user as Admin).admin_id,
-          name: user.name,
-          email: user.email,
-          role,
-        },
-        token,
-      });
-    }
-
-    // === NORMAL LOGIN FOR STUDENT / LECTURER ===
-    return res.status(200).json({
-      message: "Login successful.",
-      user: {
-        id:
-          role === "student"
+    // 6. Generate JWT Token
+    const payload = {
+      id: role === 'admin'
+          ? (user as Admin).admin_id
+          : role === 'student'
             ? (user as Student).student_id
             : (user as Lecturer).lecturer_id,
+      role: role
+    };
+
+    const token = jwt.sign(
+      payload,
+      process.env.JWT_SECRET as string,
+      { expiresIn: process.env.JWT_EXPIRES_IN || "1d" } as jwt.SignOptions
+    );
+
+    // 7. Return Response
+    return res.status(200).json({
+      message: "Login successful.",
+      token,
+      user: {
+        id: payload.id,
         name: user.name,
         email: user.email,
         role,
@@ -218,14 +243,19 @@ app.post("/login", async (req: Request, res: Response) => {
     console.error("Login error:", err);
     return res.status(500).json({ message: "Server error", error: err });
   }
-});
+}); 
 
-// Start the combined HTTP + Socket.IO server
-server.listen(port, () => {
-  console.log(`✅ Server running on http://localhost:${port}`);
-});
+// ============================================================================
+//                       BACKGROUND TASKS (AUTO-EXPIRY)
+// ============================================================================
 
-// AUTO-MARK EXPIRED SESSIONS EVERY 10 SECONDS
+/**
+ * Interval Job: Runs every 10 seconds.
+ * 1. Finds sessions that have expired but are not yet marked.
+ * 2. Marks absentees as 'missed'.
+ * 3. Updates session status to 'is_expired = 1'.
+ * 4. Notifies clients via Socket.IO.
+ */
 setInterval(async () => {
   let conn: any = null;
 
@@ -235,13 +265,10 @@ setInterval(async () => {
 
     // 1. Load sessions that have expired but not processed
     const [expiredSessions] = await conn.query(
-      `
-      SELECT session_id, class_id, started_at
-      FROM Session
-      WHERE expires_at < NOW()
-        AND is_expired = 0
-      FOR UPDATE
-      `
+      `SELECT session_id, class_id, started_at
+       FROM Session
+       WHERE expires_at < NOW() AND is_expired = 0
+       FOR UPDATE`
     );
 
     if (expiredSessions.length === 0) {
@@ -253,18 +280,15 @@ setInterval(async () => {
     for (const session of expiredSessions) {
       const { session_id, class_id, started_at } = session;
 
-      // 2. Insert "missed" check-ins
+      // 2. Insert "missed" check-ins for absent students
       await conn.query(
-        `
-        INSERT INTO Checkin (session_id, student_id, checkin_time, status)
-        SELECT ?, sc.student_id, NULL, 'missed'
-        FROM StudentClass sc
-        LEFT JOIN Checkin ci 
-            ON ci.session_id = ? AND ci.student_id = sc.student_id
-        WHERE sc.class_id = ?
-          AND sc.joined_at <= ?
-          AND ci.checkin_id IS NULL
-        `,
+        `INSERT INTO Checkin (session_id, student_id, checkin_time, status)
+         SELECT ?, sc.student_id, NULL, 'missed'
+         FROM StudentClass sc
+         LEFT JOIN Checkin ci ON ci.session_id = ? AND ci.student_id = sc.student_id
+         WHERE sc.class_id = ?
+           AND sc.joined_at <= ?
+           AND ci.checkin_id IS NULL`,
         [session_id, session_id, class_id, started_at]
       );
 
@@ -279,6 +303,8 @@ setInterval(async () => {
         class_id,
         session_id
       });
+      
+      console.log(`⏰ [Scheduler] Session ${session_id} expired. Absentees marked.`);
     }
 
     await conn.commit();
@@ -291,3 +317,11 @@ setInterval(async () => {
     }
   }
 }, 10_000);
+
+// ============================================================================
+//                            SERVER START
+// ============================================================================
+
+server.listen(PORT, () => {
+  console.log(`✅ Server running on http://localhost:${PORT}`);
+});
