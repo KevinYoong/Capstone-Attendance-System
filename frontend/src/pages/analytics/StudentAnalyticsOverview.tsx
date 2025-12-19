@@ -1,21 +1,47 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../../context/AuthContext";
-import { useNavigate } from "react-router-dom";
+
+// ==========================================
+// Types & Interfaces
+// ==========================================
+
+interface ClassAnalytics {
+  class_id: number;
+  class_name: string;
+  course_code: string;
+  total_sessions: number;
+  present_count: number;
+  missed_count: number;
+  attendance_status: "good" | "warning" | "critical";
+}
+
+interface AnalyticsResponse {
+  classes: ClassAnalytics[];
+}
+
+// ==========================================
+// Component: StudentAnalyticsOverview
+// ==========================================
 
 export default function StudentAnalyticsOverview() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const { logout } = useAuth();
 
+  // State Management
   const [loading, setLoading] = useState(true);
-  const [analytics, setAnalytics] = useState<any>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
 
+  // ------------------------------------------
+  // Data Fetching
+  // ------------------------------------------
   useEffect(() => {
     const fetchData = async () => {
       if (!user) return;
 
       try {
+        // Fetch analytics for the logged-in student
         const res = await axios.get(`http://localhost:3001/student/${user.id}/analytics`);
         setAnalytics(res.data);
       } catch (err) {
@@ -28,10 +54,14 @@ export default function StudentAnalyticsOverview() {
     fetchData();
   }, [user]);
 
+  // ------------------------------------------
+  // Render States
+  // ------------------------------------------
+
   if (loading) {
     return (
       <div className="p-8 text-white text-center">
-        Loading analytics…
+        Loading analytics...
       </div>
     );
   }
@@ -44,9 +74,14 @@ export default function StudentAnalyticsOverview() {
     );
   }
 
+  // ------------------------------------------
+  // Main Render
+  // ------------------------------------------
+
   return (
     <div className="min-h-screen bg-[#0a0f1f] text-white p-8">
-      {/* Header */}
+      
+      {/* --- Header Section --- */}
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Attendance Analytics</h1>
 
@@ -69,8 +104,10 @@ export default function StudentAnalyticsOverview() {
         </div>
       </div>
 
+      {/* --- Analytics Grid --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {analytics.classes.map((cls: any) => {
+        {analytics.classes.map((cls) => {
+          // Determine text color based on status
           const statusColor =
             cls.attendance_status === "good"
               ? "text-green-400"

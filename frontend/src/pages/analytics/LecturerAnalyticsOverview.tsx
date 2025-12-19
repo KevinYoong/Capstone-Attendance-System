@@ -1,21 +1,47 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../../context/AuthContext";
-import { useNavigate } from "react-router-dom";
+
+// ==========================================
+// Types & Interfaces
+// ==========================================
+
+interface ClassAnalyticsItem {
+  class_id: number;
+  class_name: string;
+  course_code: string;
+  total_sessions: number;
+  present_count: number;
+  missed_count: number;
+  attendance_rate: number;
+  attendance_status: "good" | "warning" | "critical";
+}
+
+interface AnalyticsResponse {
+  classes: ClassAnalyticsItem[];
+}
+
+// ==========================================
+// Component
+// ==========================================
 
 export default function LecturerAnalyticsOverview() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const { logout } = useAuth();
 
-  const [analytics, setAnalytics] = useState<any>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ------------------------------------------
+  // Data Fetching
+  // ------------------------------------------
   useEffect(() => {
     if (!user) return;
 
     const load = async () => {
       try {
+        // Fetch analytics specific to the logged-in lecturer
         const res = await axios.get(
           `http://localhost:3001/lecturer/${user.id}/analytics`
         );
@@ -30,6 +56,10 @@ export default function LecturerAnalyticsOverview() {
     load();
   }, [user]);
 
+  // ------------------------------------------
+  // Render States
+  // ------------------------------------------
+
   if (loading) {
     return <div className="text-white p-8 text-center">Loading analytics...</div>;
   }
@@ -38,9 +68,14 @@ export default function LecturerAnalyticsOverview() {
     return <div className="text-white p-8 text-center">No analytics found.</div>;
   }
 
+  // ------------------------------------------
+  // Main Render
+  // ------------------------------------------
+
   return (
     <div className="min-h-screen bg-[#0a0f1f] text-white p-8">
-      {/* Header */}
+      
+      {/* --- Header Section --- */}
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Attendance Analytics</h1>
 
@@ -63,8 +98,10 @@ export default function LecturerAnalyticsOverview() {
         </div>
       </div>
 
+      {/* --- Analytics Grid --- */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {analytics.classes.map((cls: any) => {
+        {analytics.classes.map((cls) => {
+          // Determine color based on attendance status
           const statusColor =
             cls.attendance_status === "good"
               ? "text-green-400"

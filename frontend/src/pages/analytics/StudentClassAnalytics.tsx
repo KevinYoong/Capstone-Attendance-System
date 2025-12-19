@@ -1,16 +1,49 @@
 import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../../context/AuthContext";
-import { useNavigate, useParams } from "react-router-dom";
+
+// ==========================================
+// Types & Interfaces
+// ==========================================
+
+interface Session {
+  session_id: number;
+  started_at: string;
+  status: string;
+}
+
+interface ClassAnalyticsData {
+  class_name: string;
+  course_code: string;
+  total_sessions: number;
+  present_count: number;
+  missed_count: number;
+  attendance_rate: number;
+  attendance_status: "good" | "warning" | "critical";
+  sessions: Session[];
+}
+
+interface ApiResponse {
+  class: ClassAnalyticsData;
+}
+
+// ==========================================
+// Component: StudentClassAnalytics
+// ==========================================
 
 export default function StudentClassAnalytics() {
   const { class_id } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const [data, setData] = useState<any>(null);
+  // State Management
+  const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ------------------------------------------
+  // Data Fetching
+  // ------------------------------------------
   useEffect(() => {
     const load = async () => {
       if (!user || !class_id) return;
@@ -30,6 +63,10 @@ export default function StudentClassAnalytics() {
     load();
   }, [user, class_id]);
 
+  // ------------------------------------------
+  // Render States
+  // ------------------------------------------
+
   if (loading) {
     return <div className="p-8 text-white text-center">Loading class analytics…</div>;
   }
@@ -40,23 +77,30 @@ export default function StudentClassAnalytics() {
 
   const cls = data.class;
 
-  const summary = {
-    total_sessions: cls.total_sessions,
-    present_count: cls.present_count,
-    missed_count: cls.missed_count,
-    attendance_rate: cls.attendance_rate,
-    attendance_status: cls.attendance_status
-  };
+  // ------------------------------------------
+  // Helper Logic
+  // ------------------------------------------
 
+  // Sort sessions: Latest date first (Descending)
+  const sortedSessions = [...cls.sessions].sort((a, b) => 
+    new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+  );
+
+  // Determine status color for the Summary Box
   const statusColor =
-    summary.attendance_status === "good"
+    cls.attendance_status === "good"
       ? "text-green-400"
-      : summary.attendance_status === "warning"
+      : cls.attendance_status === "warning"
       ? "text-yellow-400"
       : "text-red-400";
 
+  // ------------------------------------------
+  // Main Render
+  // ------------------------------------------
+
   return (
     <div className="min-h-screen bg-[#0a0f1f] text-white p-8">
+      {/* Back Button */}
       <button
         className="mb-6 px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600"
         onClick={() => navigate("/student/analytics")}
@@ -67,24 +111,24 @@ export default function StudentClassAnalytics() {
       <h1 className="text-3xl font-bold mb-2">{cls.class_name}</h1>
       <p className="text-gray-300 mb-4">{cls.course_code}</p>
 
-      {/* Summary Box */}
+      {/* --- Summary Box --- */}
       <div className="bg-[#181818]/70 border border-white/10 rounded-xl p-6 mb-6">
         <p className="text-lg font-semibold">Attendance Summary</p>
 
-        <p className="mt-2">Total Sessions: {summary.total_sessions}</p>
-        <p className="text-green-400">Present: {summary.present_count}</p>
-        <p className="text-red-400">Missed: {summary.missed_count}</p>
+        <p className="mt-2">Total Sessions: {cls.total_sessions}</p>
+        <p className="text-green-400">Present: {cls.present_count}</p>
+        <p className="text-red-400">Missed: {cls.missed_count}</p>
 
         <p className={`mt-2 text-xl font-bold ${statusColor}`}>
-          {summary.attendance_rate}% — {summary.attendance_status.toUpperCase()}
+          {cls.attendance_rate}% — {cls.attendance_status.toUpperCase()}
         </p>
       </div>
 
-      {/* Sessions List */}
+      {/* --- Sessions List (Sorted Latest First) --- */}
       <h2 className="text-2xl font-semibold mb-3">Session Breakdown</h2>
 
       <div className="space-y-3">
-        {cls.sessions.map((sess: any) => {
+        {sortedSessions.map((sess) => {
           const isPresent = sess.status === "present";
 
           return (

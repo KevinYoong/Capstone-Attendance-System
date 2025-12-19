@@ -1,16 +1,58 @@
 import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "../../context/AuthContext";
-import { useNavigate, useParams } from "react-router-dom";
+
+// ==========================================
+// Types & Interfaces
+// ==========================================
+
+interface Summary {
+  total_sessions: number;
+  present_total: number;
+  missed_total: number;
+}
+
+interface Session {
+  session_id: number;
+  date: string;
+  attendance_rate: number;
+  present_count: number;
+  missed_count: number;
+}
+
+interface Student {
+  student_id: number;
+  name: string;
+  email: string;
+  attendance_status: "good" | "warning" | "critical";
+  present_count: number;
+  missed_count: number;
+  attendance_rate: number;
+}
+
+interface ClassAnalyticsData {
+  summary: Summary;
+  students: Student[];
+  sessions: Session[];
+}
+
+// ==========================================
+// Component: LecturerClassAnalytics
+// ==========================================
 
 export default function LecturerClassAnalytics() {
   const { class_id } = useParams();
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const [data, setData] = useState<any>(null);
+  // State Management
+  const [data, setData] = useState<ClassAnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ------------------------------------------
+  // Data Fetching
+  // ------------------------------------------
   useEffect(() => {
     const load = async () => {
       if (!user || !class_id) return;
@@ -30,19 +72,11 @@ export default function LecturerClassAnalytics() {
     load();
   }, [user, class_id]);
 
-  if (loading) {
-    return <div className="text-white p-8 text-center">Loading class analytics…</div>;
-  }
+  // ------------------------------------------
+  // Helper Logic
+  // ------------------------------------------
 
-  if (!data) {
-    return <div className="text-white p-8 text-center">No analytics found.</div>;
-  }
-
-  const summary = data.summary;
-  const students = data.students;
-  const sessions = data.sessions;
-
-  // Assign a numeric score to each status (Lower number = Higher Priority)
+  // Helper: Assign a numeric priority to status for sorting
   const getStatusPriority = (status: string) => {
     switch (status) {
       case "critical": return 1; // Highest priority
@@ -52,21 +86,40 @@ export default function LecturerClassAnalytics() {
     }
   };
 
-  const sortedStudents = [...data.students].sort((a: any, b: any) => {
+  if (loading) {
+    return <div className="text-white p-8 text-center">Loading class analytics...</div>;
+  }
+
+  if (!data) {
+    return <div className="text-white p-8 text-center">No analytics found.</div>;
+  }
+
+  const { summary, students, sessions } = data;
+
+  // 1. Sort Students: Critical -> Warning -> Good, then Alphabetical
+  const sortedStudents = [...students].sort((a, b) => {
     const priorityA = getStatusPriority(a.attendance_status);
     const priorityB = getStatusPriority(b.attendance_status);
 
-    // Primary Sort: Compare Status Priority
     if (priorityA !== priorityB) {
       return priorityA - priorityB;
     }
-
-    // Secondary Sort: Alphabetical by Name
     return a.name.localeCompare(b.name);
   });
 
+  // 2. Sort Sessions: Latest Date First (Descending)
+  const sortedSessions = [...sessions].sort((a, b) => 
+    new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+
+  // ------------------------------------------
+  // Main Render
+  // ------------------------------------------
+
   return (
     <div className="min-h-screen text-white bg-[#0a0f1f] p-8">
+      
+      {/* Back Button */}
       <button
         onClick={() => navigate("/lecturer/analytics")}
         className="mb-6 px-4 py-2 bg-gray-700 rounded-lg hover:bg-gray-600"
@@ -76,16 +129,15 @@ export default function LecturerClassAnalytics() {
 
       <h1 className="text-3xl font-bold mb-4">Class Analytics</h1>
 
-      {/* SUMMARY */}
+      {/* --- Section 1: Summary Stats --- */}
       <div className="bg-[#181818]/70 border border-white/10 p-6 rounded-xl mb-6">
         <h2 className="text-xl font-semibold mb-2">Attendance Summary</h2>
-
         <p>Total Sessions: {summary.total_sessions}</p>
         <p className="text-green-400">Present Total: {summary.present_total}</p>
         <p className="text-red-400">Missed Total: {summary.missed_total}</p>
       </div>
 
-      {/* CSV Export */}
+      {/* --- Section 2: CSV Exports --- */}
       <div className="mb-6">
         <a
           href={`http://localhost:3001/lecturer/${user?.id}/analytics/class/${class_id}/export.csv?type=students`}
@@ -102,10 +154,10 @@ export default function LecturerClassAnalytics() {
         </a>
       </div>
 
-      {/* SESSION BREAKDOWN */}
+      {/* --- Section 3: Session Breakdown (Sorted Latest First) --- */}
       <h2 className="text-2xl font-semibold mb-3">Session Breakdown</h2>
       <div className="space-y-3 mb-6">
-        {sessions.map((s: any) => (
+        {sortedSessions.map((s) => (
           <div
             key={s.session_id}
             className="bg-[#1d1d2b] p-4 border border-white/10 rounded-xl"
@@ -122,12 +174,11 @@ export default function LecturerClassAnalytics() {
         ))}
       </div>
 
-      {/* STUDENT BREAKDOWN */}
+      {/* --- Section 4: Student List --- */}
       <h2 className="text-2xl font-semibold mb-3">Student Attendance</h2>
 
       <div className="space-y-4">
-        {sortedStudents.map((st: any) => {
-          // Determine text color based on status
+        {sortedStudents.map((st) => {
           const color =
             st.attendance_status === "good"
               ? "text-green-400"
@@ -135,7 +186,6 @@ export default function LecturerClassAnalytics() {
               ? "text-yellow-400"
               : "text-red-400";
 
-          // Determine border color highlights
           const borderClass = 
             st.attendance_status === "critical" ? "border-red-500/50" :
             st.attendance_status === "warning" ? "border-yellow-500/50" :
@@ -152,7 +202,6 @@ export default function LecturerClassAnalytics() {
                   <p className="text-gray-300 text-sm">{st.email}</p>
                 </div>
                 
-                {/* Status Badges */}
                 {st.attendance_status === "critical" && (
                   <span className="bg-red-900/50 text-red-200 text-xs px-2 py-1 rounded border border-red-500/30">
                     CRITICAL
