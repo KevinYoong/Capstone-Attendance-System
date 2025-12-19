@@ -5,6 +5,10 @@ import { io } from "../../index";
 
 const router = Router();
 
+// ==========================================
+// Types & Interfaces
+// ==========================================
+
 interface ClassRow extends RowDataPacket {
   class_id: number;
   class_name: string;
@@ -16,7 +20,22 @@ interface ClassRow extends RowDataPacket {
   lecturer_name: string;
 }
 
-// Week record type
+interface SessionRow extends RowDataPacket {
+  session_id: number;
+  class_id: number;
+  started_at: Date;
+  expires_at: Date;
+  online_mode: number;
+}
+
+interface CheckinRow extends RowDataPacket {
+  checkin_id: number;
+  session_id: number;
+  student_id: number;
+  checkin_time: Date;
+  status: string;
+}
+
 type Week = {
   Monday: ClassRow[];
   Tuesday: ClassRow[];
@@ -25,9 +44,49 @@ type Week = {
   Friday: ClassRow[];
 };
 
+// ==========================================
+// Helper Functions
+// ==========================================
+
+/**
+ * Calculate the distance between two GPS coordinates using the Haversine formula.
+ * @returns Distance in meters (rounded).
+ */
+function calculateDistance(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371000; // Earth's radius in meters
+
+  // Convert degrees to radians
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  // Haversine formula implementation
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c;
+
+  return Math.round(distance);
+}
+
+// ==========================================
+// Routes
+// ==========================================
+
+/**
+ * GET /:student_id/classes/week
+ * Retrieves the weekly class schedule for a student.
+ */
 router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
   const { student_id } = req.params;
-  const { week } = req.query; // Accept week parameter (optional for now)
   const selectedWeek = req.query.week;
 
   if (selectedWeek === "break") {
@@ -36,13 +95,11 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
       Tuesday: [],
       Wednesday: [],
       Thursday: [],
-      Friday: []
+      Friday: [],
     });
   }
 
   try {
-    // Note: week parameter accepted but not used for filtering since all classes are standard (1-14)
-    // Can be used in future for classes with specific start_week/end_week
     const [rows] = await db.query<ClassRow[]>(
       `
       SELECT
@@ -59,22 +116,21 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
       JOIN Lecturer ON Class.lecturer_id = Lecturer.lecturer_id
       WHERE StudentClass.student_id = ?
       ORDER BY FIELD(day_of_week, 'Monday','Tuesday','Wednesday','Thursday','Friday'), start_time;
-    `,
+      `,
       [student_id]
     );
 
-    const week: Week = { 
-      Monday: [], 
-      Tuesday: [], 
-      Wednesday: [], 
-      Thursday: [], 
-      Friday: [], 
+    const week: Week = {
+      Monday: [],
+      Tuesday: [],
+      Wednesday: [],
+      Thursday: [],
+      Friday: [],
     };
 
+    // Distribute classes into the correct day buckets
     rows.forEach((cls) => {
-      // cls.day_of_week is strongly typed to the union above
       const day = cls.day_of_week as keyof Week;
-      // push into the correct array
       week[day].push(cls);
     });
 
@@ -85,6 +141,11 @@ router.get("/:student_id/classes/week", async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * GET /:student_id/attendance/semester
+ * Retrieves attendance summary for the active semester.
+ * Note: Uses a fixed 14-week calculation rule for status.
+ */
 router.get("/:student_id/attendance/semester", async (req: Request, res: Response) => {
   const { student_id } = req.params;
 
@@ -92,10 +153,8 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
     const [semRows] = await db.query<any[]>(
       `SELECT * FROM Semester WHERE status = 'active' LIMIT 1`
     );
-    // ... (keep active semester check) ...
     const semester = semRows[0];
 
-    // 1. UPDATE QUERY to select s.scheduled_date
     const [sessionRows] = await db.query<any[]>(
       `
       SELECT 
@@ -108,24 +167,20 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
         s.scheduled_date,  
         c.class_name,
         c.course_code,
-
         ci.status AS student_status
-
       FROM Session s
       JOIN Class c ON c.class_id = s.class_id
       JOIN StudentClass sc ON sc.class_id = s.class_id AND sc.student_id = ?
-
       LEFT JOIN Checkin ci 
         ON ci.session_id = s.session_id 
        AND ci.student_id = ?
-
       WHERE s.started_at BETWEEN ? AND ?
       ORDER BY s.started_at ASC
       `,
       [student_id, student_id, semester.start_date, semester.end_date]
     );
 
-    // 2. UPDATE MAPPING to include formatted scheduled_date
+    // Map rows to clean response objects with formatted dates
     const attendance = sessionRows.map((s) => {
       let status = s.student_status;
       if (!status) {
@@ -141,14 +196,13 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
         expires_at: s.expires_at,
         online_mode: s.online_mode,
         student_status: status,
-        // Ensure consistent YYYY-MM-DD format
-        scheduled_date: s.scheduled_date 
-          ? new Date(s.scheduled_date).toLocaleDateString('en-CA') 
-          : null
+        scheduled_date: s.scheduled_date
+          ? new Date(s.scheduled_date).toLocaleDateString("en-CA")
+          : null,
       };
     });
 
-    // 4. Build per-class summary (for analytics UI & lecturer UI)
+    // Build per-class summary for analytics
     const summaryByClass: Record<number, any> = {};
 
     attendance.forEach((a) => {
@@ -168,12 +222,11 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
       }
     });
 
-    // ---- Apply 14-week attendance rule ----
+    // Apply the 14-week rule for attendance grading
     const FINAL_TOTAL = 14;
 
     Object.values(summaryByClass).forEach((cls: any) => {
       const missed = cls.missed_count;
-
       const present = FINAL_TOTAL - missed;
       const attendance_rate = Math.round((present / FINAL_TOTAL) * 100);
 
@@ -193,25 +246,28 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
       success: true,
       semester,
       attendance,
-      summary_by_class: Object.values(summaryByClass)
+      summary_by_class: Object.values(summaryByClass),
     });
 
   } catch (err) {
     console.error("Error loading semester attendance:", err);
     res.status(500).json({
       success: false,
-      message: "Failed to load semester attendance"
+      message: "Failed to load semester attendance",
     });
   }
 });
 
+/**
+ * GET /:student_id/active-sessions
+ * Fetches sessions that are currently running/active.
+ */
 router.get("/:student_id/active-sessions", async (req: Request, res: Response) => {
   const { student_id } = req.params;
 
   console.log(`🔍 [API] Fetching active sessions for Student ID: ${student_id}`);
 
   try {
-    // 1. ADD `s.scheduled_date` TO THIS SELECT QUERY
     const [rows] = await db.query<any[]>(
       `
       SELECT s.session_id, s.class_id, s.started_at, s.expires_at, s.online_mode, s.scheduled_date
@@ -227,14 +283,12 @@ router.get("/:student_id/active-sessions", async (req: Request, res: Response) =
 
     console.log(`📊 [DB] Raw Active Sessions Found: ${rows.length}`, rows);
 
-    // 2. INCLUDE `scheduled_date` IN THE MAPPED RESPONSE
     const sessions = rows.map((r) => {
-      // Debug date formatting
       const rawDate = r.scheduled_date;
-      const formattedDate = rawDate 
-        ? new Date(rawDate).toLocaleDateString('en-CA')
+      const formattedDate = rawDate
+        ? new Date(rawDate).toLocaleDateString("en-CA")
         : null;
-        
+
       console.log(`🗓️ [Map] Session ${r.session_id}: Raw Date: ${rawDate} -> Formatted: ${formattedDate}`);
 
       return {
@@ -243,7 +297,7 @@ router.get("/:student_id/active-sessions", async (req: Request, res: Response) =
         started_at: r.started_at,
         expires_at: r.expires_at,
         online_mode: !!r.online_mode,
-        scheduled_date: formattedDate
+        scheduled_date: formattedDate,
       };
     });
 
@@ -254,87 +308,40 @@ router.get("/:student_id/active-sessions", async (req: Request, res: Response) =
   }
 });
 
+/**
+ * POST /session-started
+ * Emits a socket event when a lecturer starts a session.
+ */
 router.post("/session-started", (req: Request, res: Response) => {
   const { class_id, started_at, expires_at } = req.body;
-
   io.emit("session_started", { class_id, started_at, expires_at });
-
   res.json({ message: "Event emitted" });
 });
 
 /**
- * Calculate the distance between two GPS coordinates using the Haversine formula
- * @param lat1 - Latitude of first point (in degrees)
- * @param lon1 - Longitude of first point (in degrees)
- * @param lat2 - Latitude of second point (in degrees)
- * @param lon2 - Longitude of second point (in degrees)
- * @returns Distance in meters
+ * POST /checkin
+ * Handles student check-in with validation for session expiry, location (geofencing), and duplicates.
  */
-function calculateDistance(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
-  const R = 6371000; // Earth's radius in meters
-
-  // Convert degrees to radians
-  const φ1 = (lat1 * Math.PI) / 180;
-  const φ2 = (lat2 * Math.PI) / 180;
-  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-  // Haversine formula
-  const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  const distance = R * c; // Distance in meters
-
-  return Math.round(distance); // Return distance rounded to nearest meter
-}
-
-// TypeScript interfaces for check-in
-interface SessionRow extends RowDataPacket {
-  session_id: number;
-  class_id: number;
-  started_at: Date;
-  expires_at: Date;
-  online_mode: number;
-}
-
-interface CheckinRow extends RowDataPacket {
-  checkin_id: number;
-  session_id: number;
-  student_id: number;
-  checkin_time: Date;
-  status: string;
-}
-
-// POST /student/checkin - Check-in endpoint with geolocation validation
 router.post("/checkin", async (req: Request, res: Response) => {
   const { student_id, session_id, latitude, longitude, accuracy } = req.body;
 
-  // Validate required fields
+  // Validate required inputs
   if (!student_id || !session_id) {
     return res.status(400).json({
       success: false,
-      message: "student_id and session_id are required"
+      message: "student_id and session_id are required",
     });
   }
 
-  // Validate geolocation data
   if (latitude === undefined || longitude === undefined || accuracy === undefined) {
     return res.status(400).json({
       success: false,
-      message: "Geolocation data (latitude, longitude, accuracy) is required"
+      message: "Geolocation data (latitude, longitude, accuracy) is required",
     });
   }
 
   try {
-    // 1. Check if session exists and is still valid
+    // 1. Check if session exists and is valid
     const [sessionRows] = await db.query<SessionRow[]>(
       `SELECT session_id, class_id, started_at, expires_at, online_mode, scheduled_date
        FROM Session
@@ -343,10 +350,7 @@ router.post("/checkin", async (req: Request, res: Response) => {
     );
 
     if (sessionRows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Session not found"
-      });
+      return res.status(404).json({ success: false, message: "Session not found" });
     }
 
     const session = sessionRows[0];
@@ -356,102 +360,86 @@ router.post("/checkin", async (req: Request, res: Response) => {
     const expiresAt = new Date(session.expires_at);
 
     if (now > expiresAt) {
-      return res.status(400).json({
-        success: false,
-        message: "Session has expired"
-      });
+      return res.status(400).json({ success: false, message: "Session has expired" });
     }
 
-    // 3. Geolocation validation (skip if online_mode is enabled)
+    // 3. Geolocation validation (Skipped if online_mode is active)
     if (session.online_mode === 0) {
-      // Load campus coordinates from environment variables
       const campusLat = parseFloat(process.env.CAMPUS_LATITUDE || "0");
       const campusLng = parseFloat(process.env.CAMPUS_LONGITUDE || "0");
       const campusRadius = parseFloat(process.env.CAMPUS_RADIUS || "500");
 
       if (campusLat === 0 || campusLng === 0) {
-        return res.status(500).json({
-          success: false,
-          message: "Campus location not configured"
-        });
+        return res.status(500).json({ success: false, message: "Campus location not configured" });
       }
 
-      // Calculate distance between student and campus
       const distance = calculateDistance(latitude, longitude, campusLat, campusLng);
 
       console.log(`Check-in validation: Student at (${latitude}, ${longitude}), Campus at (${campusLat}, ${campusLng}), Distance: ${distance}m, Accuracy: ${accuracy}m, Allowed radius: ${campusRadius}m`);
 
-      // Reject if student is outside campus radius
       if (distance > campusRadius) {
         return res.status(403).json({
           success: false,
-          message: `You are too far from campus. Distance: ${distance}m (max: ${campusRadius}m)`
+          message: `You are too far from campus. Distance: ${distance}m (max: ${campusRadius}m)`,
         });
       }
 
-      // Warn if GPS accuracy is poor (but still allow check-in)
       if (accuracy > 100) {
         console.warn(`Warning: Poor GPS accuracy (${accuracy}m) for student ${student_id}`);
       }
     }
 
-    // 4. Check if student is already checked in for this session
+    // 4. Check for existing check-ins
     const [existingCheckins] = await db.query<CheckinRow[]>(
-      `SELECT checkin_id
-       FROM Checkin
-       WHERE session_id = ? AND student_id = ?`,
+      `SELECT checkin_id FROM Checkin WHERE session_id = ? AND student_id = ?`,
       [session_id, student_id]
     );
 
     if (existingCheckins.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Already checked in for this session"
-      });
+      return res.status(400).json({ success: false, message: "Already checked in for this session" });
     }
 
-    // 5. Insert check-in record with geolocation data
-    const [result] = await db.query(
+    // 5. Record the check-in
+    await db.query(
       `INSERT INTO Checkin (session_id, student_id, checkin_time, status, student_lat, student_lng, accuracy)
        VALUES (?, ?, NOW(), 'present', ?, ?, ?)`,
       [session_id, student_id, latitude, longitude, accuracy]
     );
 
-    // 6. Emit Socket.IO event for real-time updates
+    // 6. Notify clients via Socket.IO
     io.to(`class_${session.class_id}`).emit("studentCheckedIn", {
       class_id: session.class_id,
       session_id: session_id,
       student_id: student_id,
       checkin_time: new Date(),
-      status: "present"
+      status: "present",
     });
 
-    // 7. Return success response
     return res.status(200).json({
       success: true,
       message: "Check-in successful",
       data: {
         session_id: session_id,
         student_id: student_id,
-        status: "present"
-      }
+        status: "present",
+      },
     });
 
   } catch (error) {
     console.error("Check-in error:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Error processing check-in"
-    });
+    return res.status(500).json({ success: false, message: "Error processing check-in" });
   }
 });
 
-// Student analytics endpoint (Semester overview)
+/**
+ * GET /:student_id/analytics
+ * Provides a semester overview for the student (grades based on DB session counts).
+ */
 router.get("/:student_id/analytics", async (req: Request, res: Response) => {
   const { student_id } = req.params;
 
   try {
-    // 1) Get active semester
+    // Get active semester
     const [semRows] = await db.query<any[]>(
       `SELECT * FROM Semester WHERE status = 'active' LIMIT 1`
     );
@@ -460,7 +448,7 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
     }
     const semester = semRows[0];
 
-    // 2) Get classes the student is enrolled in
+    // Get enrolled classes
     const [classRows] = await db.query<any[]>(
       `
       SELECT 
@@ -480,9 +468,8 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
 
     const summaryResults: any[] = [];
 
-    // 3) Process each class
     for (const cls of classRows) {
-      // A. Get Total Sessions Count from DB for this semester
+      // Get total sessions count from DB
       const [countRows] = await db.query<any[]>(
         `SELECT COUNT(*) AS total 
          FROM Session 
@@ -492,7 +479,7 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
       );
       const totalSessions = countRows[0].total || 0;
 
-      // B. Get Past/Active sessions to calculate "Missed"
+      // Get sessions to calculate missed count
       const [sessions] = await db.query<any[]>(
         `
         SELECT s.session_id, s.started_at, s.expires_at, s.is_expired
@@ -516,30 +503,24 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
         const now = new Date();
         const expiresAt = new Date(sess.expires_at);
         const isExpired = sess.is_expired === 1 || now > expiresAt;
-
         let isMissed = false;
 
         if (check.length > 0) {
-          if (check[0].status === 'missed') isMissed = true;
+          if (check[0].status === "missed") isMissed = true;
         } else {
-          // No record found + Session expired = Missed
+          // No record + Session expired = Missed
           if (isExpired) isMissed = true;
         }
 
         if (isMissed) actualMissedCount++;
       }
 
-      // C. Calculate Score
-      // If totalSessions is 0 (class hasn't started), rate is 100% by default or 0% depending on preference. 
-      // Usually 100% is safer to avoid "Critical" alerts before semester starts.
+      // Calculate score dynamically based on DB totals
       const safeTotal = totalSessions === 0 ? 1 : totalSessions;
-      
-      // Deduction Logic: Score = Total - Missed
       const projectedPresent = Math.max(0, totalSessions - actualMissedCount);
-      
-      const attendance_rate = totalSessions === 0 
-        ? 100 
-        : Math.round((projectedPresent / safeTotal) * 100);
+
+      const attendance_rate =
+        totalSessions === 0 ? 100 : Math.round((projectedPresent / safeTotal) * 100);
 
       let attendance_status: "good" | "warning" | "critical";
       if (attendance_rate >= 90) attendance_status = "good";
@@ -551,10 +532,10 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
         class_name: cls.class_name,
         course_code: cls.course_code,
         lecturer_name: cls.lecturer_name,
-        total_sessions: totalSessions,    // <--- Now dynamic from DB
-        present_count: projectedPresent,  // (Total - Missed)
+        total_sessions: totalSessions,
+        present_count: projectedPresent,
         missed_count: actualMissedCount,
-        attendance_rate: attendance_rate, // <--- Percentage returned here
+        attendance_rate: attendance_rate,
         attendance_status: attendance_status,
       });
     }
@@ -562,21 +543,23 @@ router.get("/:student_id/analytics", async (req: Request, res: Response) => {
     return res.json({
       success: true,
       semester,
-      classes: summaryResults
+      classes: summaryResults,
     });
-
   } catch (err) {
     console.error("Error fetching student analytics:", err);
     return res.status(500).json({ success: false, message: "Error loading student analytics" });
   }
 });
 
-// Student analytics endpoint (Per-class detailed)
+/**
+ * GET /:student_id/analytics/class/:class_id
+ * Detailed analytics for a specific class.
+ */
 router.get("/:student_id/analytics/class/:class_id", async (req: Request, res: Response) => {
   const { student_id, class_id } = req.params;
 
   try {
-    // 1) Get active semester
+    // Get active semester
     const [semRows] = await db.query<any[]>(
       `SELECT * FROM Semester WHERE status = 'active' LIMIT 1`
     );
@@ -585,7 +568,7 @@ router.get("/:student_id/analytics/class/:class_id", async (req: Request, res: R
     }
     const semester = semRows[0];
 
-    // 2) Validate enrollment
+    // Validate enrollment
     const [enrollmentRows] = await db.query<any[]>(
       `
       SELECT c.class_id, c.class_name, c.course_code, c.class_type,
@@ -603,7 +586,7 @@ router.get("/:student_id/analytics/class/:class_id", async (req: Request, res: R
     }
     const classInfo = enrollmentRows[0];
 
-    // 3) Get ALL sessions (Past and Future)
+    // Get ALL sessions (Past and Future)
     const [sessions] = await db.query<any[]>(
       `
       SELECT s.session_id, s.started_at, s.expires_at, s.is_expired, s.online_mode
@@ -615,14 +598,12 @@ router.get("/:student_id/analytics/class/:class_id", async (req: Request, res: R
       [class_id, semester.start_date, semester.end_date]
     );
 
-    // DYNAMIC TOTAL: The length of this array IS the total sessions scheduled in DB
     const totalSessions = sessions.length;
-
     let actualMissedCount = 0;
     const sessionDetails: any[] = [];
     const now = new Date();
 
-    // 4) Check attendance for each session
+    // Check attendance for each session
     for (const sess of sessions) {
       const [check] = await db.query<any[]>(
         `SELECT status, checkin_time FROM Checkin WHERE session_id = ? AND student_id = ? LIMIT 1`,
@@ -631,17 +612,17 @@ router.get("/:student_id/analytics/class/:class_id", async (req: Request, res: R
 
       const expiresAt = new Date(sess.expires_at);
       const isExpired = sess.is_expired === 1 || now > expiresAt;
-      
-      let status = "pending"; 
+
+      let status = "pending";
       let checkinTime = null;
 
       if (check.length > 0) {
         const dbStatus = check[0].status;
         checkinTime = check[0].checkin_time;
 
-        if (dbStatus === 'present' || dbStatus === 'checked-in') {
+        if (dbStatus === "present" || dbStatus === "checked-in") {
           status = "present";
-        } else if (dbStatus === 'missed') {
+        } else if (dbStatus === "missed") {
           status = "missed";
           actualMissedCount++;
         }
@@ -658,24 +639,23 @@ router.get("/:student_id/analytics/class/:class_id", async (req: Request, res: R
         expires_at: sess.expires_at,
         online_mode: !!sess.online_mode,
         status: status,
-        checkin_time: checkinTime
+        checkin_time: checkinTime,
       });
     }
 
-    // 5) Calculate Logic
+    // Calculate Statistics
     const safeTotal = totalSessions === 0 ? 1 : totalSessions;
     const attendanceRemaining = Math.max(0, totalSessions - actualMissedCount);
-    
-    const attendanceRate = totalSessions === 0 
-      ? 100 
-      : Math.round((attendanceRemaining / safeTotal) * 100);
+
+    const attendanceRate =
+      totalSessions === 0 ? 100 : Math.round((attendanceRemaining / safeTotal) * 100);
 
     let attStatus: "good" | "warning" | "critical";
     if (attendanceRate >= 90) attStatus = "good";
     else if (attendanceRate >= 80) attStatus = "warning";
     else attStatus = "critical";
 
-    const sessionsHeld = sessionDetails.filter(s => s.status !== 'pending').length;
+    const sessionsHeld = sessionDetails.filter((s) => s.status !== "pending").length;
     const remainingSessions = Math.max(0, totalSessions - sessionsHeld);
 
     return res.json({
@@ -683,7 +663,7 @@ router.get("/:student_id/analytics/class/:class_id", async (req: Request, res: R
       semester,
       class: {
         ...classInfo,
-        total_sessions: totalSessions, // <--- Dynamic from DB
+        total_sessions: totalSessions,
         present_count: attendanceRemaining,
         missed_count: actualMissedCount,
         attendance_rate: attendanceRate,
@@ -691,13 +671,12 @@ router.get("/:student_id/analytics/class/:class_id", async (req: Request, res: R
         sessions: sessionDetails,
         insights: {
           remaining_sessions: remainingSessions,
-          projected_final_rate: attendanceRate, 
+          projected_final_rate: attendanceRate,
           is_at_risk: attendanceRate < 80,
-          is_warning: attendanceRate >= 80 && attendanceRate < 90
-        }
-      }
+          is_warning: attendanceRate >= 80 && attendanceRate < 90,
+        },
+      },
     });
-
   } catch (err) {
     console.error("Error fetching class analytics:", err);
     return res.status(500).json({ success: false, message: "Error fetching class analytics" });
