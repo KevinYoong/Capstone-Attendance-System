@@ -349,31 +349,45 @@ router.post("/students/:student_id/classes", async (req: Request, res: Response)
     const { student_id } = req.params;
     const { class_id } = req.body;
 
-    if (!class_id) return res.status(400).json({ success: false, message: "Class ID is required" });
-
-    // Check if already enrolled
-    const [existing] = await db.query<any[]>(
-      "SELECT * FROM StudentClass WHERE student_id = ? AND class_id = ?",
-      [student_id, class_id]
-    );
-
-    if (existing.length > 0) {
-      return res.status(400).json({ success: false, message: "Student is already enrolled in this class" });
-    }
-
-    await db.query(
-      "INSERT INTO StudentClass (student_id, class_id) VALUES (?, ?)",
-      [student_id, class_id]
-    );
-
-    // Return class details for UI update
-    const [rows] = await db.query<any[]>(
-      "SELECT class_id, class_name, course_code FROM Class WHERE class_id = ?",
+    // 1. Get details of the class we are trying to enroll in
+    const [targetClassRows] = await db.query<any[]>(
+      "SELECT day_of_week, start_time, end_time, class_name FROM Class WHERE class_id = ?",
       [class_id]
     );
+    const target = targetClassRows[0];
+
+    // 2. Check for Clashes with student's current schedule
+    const [clashes] = await db.query<any[]>(
+      `
+      SELECT c.class_name, c.start_time, c.end_time 
+      FROM StudentClass sc
+      JOIN Class c ON sc.class_id = c.class_id
+      WHERE sc.student_id = ? 
+        AND c.day_of_week = ?
+        AND (
+          (c.start_time < ? AND c.end_time > ?) -- Overlaps start
+          OR (c.start_time < ? AND c.end_time > ?) -- Overlaps end
+          OR (? < c.end_time AND ? > c.start_time) -- Target is inside existing
+        )
+      `,
+      [student_id, target.day_of_week, target.end_time, target.start_time, target.end_time, target.start_time, target.start_time, target.end_time]
+    );
+
+    if (clashes.length > 0) {
+      return res.status(409).json({ 
+        success: false, 
+        message: `Clash detected with existing class: ${clashes[0].class_name} (${clashes[0].start_time}-${clashes[0].end_time})` 
+      });
+    }
+
+    // 3. Proceed with enrollment if no clash
+    await db.query("INSERT INTO StudentClass (student_id, class_id) VALUES (?, ?)", [student_id, class_id]);
+
+    // Return class details for UI update
+    const [rows] = await db.query<any[]>("SELECT class_id, class_name, course_code FROM Class WHERE class_id = ?", [class_id]);
     res.json({ success: true, data: rows[0] });
   } catch (err) {
-    console.error("Enroll error:", err);
+    console.error(err);
     res.status(500).json({ success: false, error: "Server error" });
   }
 });

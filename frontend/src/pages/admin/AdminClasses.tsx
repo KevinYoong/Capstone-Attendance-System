@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Search,
   ArrowUpDown,
+  AlertCircle,
 } from "lucide-react";
 
 // ============================================================================
@@ -452,25 +453,51 @@ export default function AdminClasses() {
                         </td>
                       </tr>
                       
-                      {/* Expanded Row for Students */}
+                      {/* Expanded Row for Students with Vertical Alphabetical Sorting */}
                       {isExpanded && (
                         <tr className="bg-[#15151b] border-t border-white/5 animate-in fade-in slide-in-from-top-2 duration-200">
                           <td colSpan={7} className="p-4">
                             <div className="pl-6 border-l-2 border-blue-500/50 ml-4">
-                                <h4 className="text-xs uppercase text-gray-500 font-bold mb-3">Enrolled Students List</h4>
-                                {cls.students_enrolled.length === 0 ? (
-                                  <div className="text-gray-500 italic text-sm">No students currently enrolled.</div>
-                                ) : (
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                                    {cls.students_enrolled.map((s) => (
-                                      <div key={s.student_id} className="flex items-center gap-2 text-sm text-gray-300 bg-white/5 p-2 rounded">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0"></div>
-                                        <span className="truncate">{s.name}</span>
-                                        <span className="text-gray-500 text-xs ml-auto">({s.student_id})</span>
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
+                              <h4 className="text-xs uppercase text-gray-500 font-bold mb-3">Enrolled Students List</h4>
+                              {cls.students_enrolled.length === 0 ? (
+                                <div className="text-gray-500 italic text-sm">No students currently enrolled.</div>
+                              ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-2">
+                                  {(() => {
+                                    // 1. Sort students alphabetically
+                                    const sorted = [...cls.students_enrolled].sort((a, b) => 
+                                      a.name.localeCompare(b.name)
+                                    );
+                                    
+                                    const total = sorted.length;
+                                    const cols = 3; 
+                                    const rows = Math.ceil(total / cols);
+                                    
+                                    const gridItems = [];
+                                    for (let r = 0; r < rows; r++) {
+                                      for (let c = 0; c < cols; c++) {
+                                        const index = c * rows + r;
+                                        const s = sorted[index]; // This might be undefined for empty slots
+
+                                        if (index < total && s) {
+                                          gridItems.push(
+                                            <div key={s.student_id} className="flex items-center gap-2 text-sm text-gray-300 bg-white/5 p-2 rounded">
+                                              <div className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0"></div>
+                                              {/* FIXED: Check s exists before accessing properties */}
+                                              <span className="truncate">{s.name}</span>
+                                              <span className="text-gray-500 text-xs ml-auto">({s.student_id})</span>
+                                            </div>
+                                          );
+                                        } else {
+                                          // Placeholder for empty grid cells to maintain vertical alignment
+                                          gridItems.push(<div key={`empty-${r}-${c}`} className="p-2 invisible"></div>);
+                                        }
+                                      }
+                                    }
+                                    return gridItems;
+                                  })()}
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -508,14 +535,26 @@ export default function AdminClasses() {
       {/* MODALS */}
       {showCreate && (
         <ModalShell title="Create New Class" onClose={() => setShowCreate(false)}>
-          <ClassForm form={form} setForm={setForm} lecturers={lecturers} />
+          <ClassForm 
+            form={form} 
+            setForm={setForm} 
+            lecturers={lecturers} 
+            allClasses={classes} 
+          />
           <FormActions onCancel={() => setShowCreate(false)} onSubmit={submitCreate} submitText="Create Class" />
         </ModalShell>
       )}
 
       {showEdit && selectedClass && (
         <ModalShell title="Edit Class Details" onClose={() => setShowEdit(false)}>
-          <ClassForm form={form} setForm={setForm} lecturers={lecturers} />
+          {/* Added 'allClasses' and 'editingClassId' props below */}
+          <ClassForm 
+            form={form} 
+            setForm={setForm} 
+            lecturers={lecturers} 
+            allClasses={classes} 
+            editingClassId={selectedClass.class_id} 
+          />
           <FormActions onCancel={() => setShowEdit(false)} onSubmit={submitEdit} submitText="Save Changes" />
         </ModalShell>
       )}
@@ -568,221 +607,99 @@ function ActionButton({ onClick, icon, color, tooltip }: { onClick: () => void, 
 }
 
 // ---- Class Form ----
+function ClassForm({ form, setForm, lecturers, allClasses, editingClassId }: any) {
+  
+  // Logical check for scheduling overlaps
+  const lecturerClash = useMemo(() => {
+    if (!form.lecturer_id || form.lecturer_id === 0) return null;
 
-interface ClassFormProps {
-  form: ClassFormState;
-  setForm: React.Dispatch<React.SetStateAction<ClassFormState>>;
-  lecturers: Lecturer[];
-}
+    return allClasses.find((c: any) => 
+      c.lecturer_id === form.lecturer_id &&
+      c.day_of_week === form.day_of_week &&
+      c.class_id !== editingClassId && // Ignore current class if editing
+      // Check if time ranges overlap
+      ((form.start_time < c.end_time && form.end_time > c.start_time))
+    );
+  }, [form, allClasses, editingClassId]);
 
-function ClassForm({ form, setForm, lecturers }: ClassFormProps) {
   return (
     <div className="space-y-4">
-      {/* Name & Code */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm text-gray-400 mb-1">Class Name</label>
-          <input
-            placeholder="e.g. Intro to Computing"
-            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white focus:border-blue-500 outline-none transition"
-            value={form.class_name}
-            onChange={(e) => setForm({ ...form, class_name: e.target.value })}
-          />
+          <input className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white" value={form.class_name} onChange={e => setForm({...form, class_name: e.target.value})} />
         </div>
         <div>
           <label className="block text-sm text-gray-400 mb-1">Course Code</label>
-          <input
-            placeholder="e.g. CSCP1014"
-            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white focus:border-blue-500 outline-none transition"
-            value={form.course_code}
-            onChange={(e) => setForm({ ...form, course_code: e.target.value })}
-          />
+          <input className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white" value={form.course_code} onChange={e => setForm({...form, course_code: e.target.value})} />
         </div>
       </div>
 
-      {/* Lecturer & Type */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Lecturer</label>
-          <select
-            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white focus:border-blue-500 outline-none"
-            value={form.lecturer_id}
-            onChange={(e) => setForm({ ...form, lecturer_id: Number(e.target.value) })}
-          >
-            <option value={0}>-- Select lecturer --</option>
-            {lecturers.map((l) => (
-              <option key={l.lecturer_id} value={l.lecturer_id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">Class Type</label>
-          <select
-            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white focus:border-blue-500 outline-none"
-            value={form.class_type}
-            onChange={(e) => setForm({ ...form, class_type: e.target.value })}
-          >
-            <option value="Lecture">Lecture</option>
-            <option value="Tutorial">Tutorial</option>
-          </select>
-        </div>
-      </div>
-
-      {/* Schedule */}
       <div>
-        <label className="block text-sm text-gray-400 mb-1">Schedule Day</label>
-        <select
-          className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white focus:border-blue-500 outline-none"
-          value={form.day_of_week}
-          onChange={(e) => setForm({ ...form, day_of_week: e.target.value })}
+        <label className="block text-sm text-gray-400 mb-1">Lecturer</label>
+        <select 
+          className={`w-full p-3 bg-[#101010] border rounded-lg text-white outline-none transition ${lecturerClash ? 'border-orange-500' : 'border-white/10'}`} 
+          value={form.lecturer_id} 
+          onChange={e => setForm({...form, lecturer_id: Number(e.target.value)})}
         >
-          {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map((d) => (
-            <option key={d}>{d}</option>
-          ))}
+          <option value={0}>-- Select Lecturer --</option>
+          {lecturers.map((l: any) => <option key={l.lecturer_id} value={l.lecturer_id}>{l.name}</option>)}
         </select>
-      </div>
-
-      {/* Time Range */}
-      <div className="flex gap-4">
-        <div className="flex-1">
-          <label className="block text-sm text-gray-400 mb-1">Start Time</label>
-          <input
-            type="time"
-            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white focus:border-blue-500 outline-none"
-            value={form.start_time}
-            onChange={(e) => setForm({ ...form, start_time: e.target.value })}
-          />
-        </div>
-        <div className="flex-1">
-          <label className="block text-sm text-gray-400 mb-1">End Time</label>
-          <input
-            type="time"
-            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white focus:border-blue-500 outline-none"
-            value={form.end_time}
-            onChange={(e) => setForm({ ...form, end_time: e.target.value })}
-          />
-        </div>
-      </div>
-
-      {/* Week Range */}
-      <div className="flex gap-4">
-        <div className="flex-1">
-          <label className="block text-sm text-gray-400 mb-1">Start Week</label>
-          <input
-            type="number"
-            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white focus:border-blue-500 outline-none"
-            value={form.start_week}
-            min={1}
-            max={14}
-            onChange={(e) => setForm({ ...form, start_week: Number(e.target.value) })}
-          />
-        </div>
-        <div className="flex-1">
-          <label className="block text-sm text-gray-400 mb-1">End Week</label>
-          <input
-            type="number"
-            className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white focus:border-blue-500 outline-none"
-            value={form.end_week}
-            min={1}
-            max={14}
-            onChange={(e) => setForm({ ...form, end_week: Number(e.target.value) })}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---- Assign Students ----
-
-interface AssignStudentsProps {
-  assignSearch: string;
-  setAssignSearch: React.Dispatch<React.SetStateAction<string>>;
-  filteredStudents: Student[];
-  assignSelected: Set<number>;
-  setAssignSelected: React.Dispatch<React.SetStateAction<Set<number>>>;
-}
-
-function AssignStudents({
-  assignSearch,
-  setAssignSearch,
-  filteredStudents,
-  assignSelected,
-  setAssignSelected,
-}: AssignStudentsProps) {
-  return (
-    <div className="space-y-3">
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" size={16} />
-        <input
-          placeholder="Search students to enroll..."
-          value={assignSearch}
-          onChange={(e) => setAssignSearch(e.target.value)}
-          className="w-full pl-9 pr-3 py-3 bg-[#101010] border border-white/10 rounded-lg text-white focus:border-blue-500 outline-none"
-        />
-      </div>
-
-      <div className="max-h-[50vh] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-        {filteredStudents.length === 0 ? (
-          <p className="text-center text-gray-500 py-4">No students found.</p>
-        ) : (
-          filteredStudents.map((s) => (
-            <label
-              key={s.student_id}
-              className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition ${
-                assignSelected.has(s.student_id) 
-                  ? "bg-blue-600/10 border-blue-500/50" 
-                  : "bg-[#111] border-white/5 hover:bg-white/5"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={assignSelected.has(s.student_id)}
-                onChange={(e) => {
-                  const next = new Set(assignSelected);
-                  e.target.checked ? next.add(s.student_id) : next.delete(s.student_id);
-                  setAssignSelected(next);
-                }}
-                className="accent-blue-600 w-4 h-4"
-              />
-              <div>
-                <div className="text-sm font-medium text-white">{s.name}</div>
-                <div className="text-xs text-gray-400">
-                  ID: {s.student_id} • {s.email}
-                </div>
-              </div>
-            </label>
-          ))
+        
+        {/* Warning Indicator */}
+        {lecturerClash && (
+          <div className="flex items-center gap-2 mt-2 text-orange-400 text-xs font-bold animate-pulse">
+            <AlertCircle size={14} />
+            Lecturer is already teaching "{lecturerClash.class_name}" at this time.
+          </div>
         )}
       </div>
-      
-      <div className="text-xs text-gray-500 text-right">
-        {assignSelected.size} students selected
+
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <label className="block text-sm text-gray-400 mb-1">Day</label>
+          <select className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white" value={form.day_of_week} onChange={e => setForm({...form, day_of_week: e.target.value})}>
+            {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"].map(d => <option key={d}>{d}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-sm text-gray-400 mb-1">Start</label>
+          <input type="time" className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white" value={form.start_time} onChange={e => setForm({...form, start_time: e.target.value})} />
+        </div>
+        <div>
+          <label className="block text-sm text-gray-400 mb-1">End</label>
+          <input type="time" className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white" value={form.end_time} onChange={e => setForm({...form, end_time: e.target.value})} />
+        </div>
       </div>
     </div>
   );
 }
 
-// ---- Modal Shell ----
-
-interface ModalShellProps {
-  title: string;
-  onClose: () => void;
-  children: React.ReactNode;
+function AssignStudents({ assignSearch, setAssignSearch, filteredStudents, assignSelected, setAssignSelected }: any) {
+  return (
+    <div className="space-y-3">
+      <input placeholder="Search students..." value={assignSearch} onChange={e => setAssignSearch(e.target.value)} className="w-full p-3 bg-[#101010] border border-white/10 rounded-lg text-white" />
+      <div className="max-h-60 overflow-y-auto space-y-2 pr-2">
+        {filteredStudents.map((s: any) => (
+          <label key={s.student_id} className="flex items-center gap-3 p-3 bg-[#111] rounded-lg border border-white/5 cursor-pointer">
+            <input type="checkbox" checked={assignSelected.has(s.student_id)} onChange={e => {
+              const next = new Set(assignSelected);
+              e.target.checked ? next.add(s.student_id) : next.delete(s.student_id);
+              setAssignSelected(next);
+            }} />
+            <div className="text-sm">{s.name} ({s.student_id})</div>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
 }
 
-function ModalShell({ title, onClose, children }: ModalShellProps) {
+function ModalShell({ title, onClose, children }: any) {
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
       <div className="bg-[#181818] p-6 rounded-xl w-full max-w-xl border border-white/10 shadow-2xl relative">
-        <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/10">
-          <h3 className="text-lg font-bold text-white">{title}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-white transition">
-            ✕
-          </button>
-        </div>
+        <h3 className="text-lg font-bold text-white mb-6 border-b border-white/10 pb-4">{title}</h3>
         {children}
       </div>
     </div>

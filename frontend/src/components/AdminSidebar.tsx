@@ -71,8 +71,8 @@ export default function AdminSidebar() {
 
   return (
     <aside
-      className={`h-screen bg-[#181818] border-r border-white/10 flex flex-col transition-all duration-300 ${
-        collapsed ? "w-20" : "w-64"
+      className={`h-full bg-[#181818] border-r border-white/10 flex flex-col flex-shrink-0 transition-all duration-300 ${
+        collapsed ? "w-20" : "w-56"
       }`}
     >
       {/* Header / Logo Area */}

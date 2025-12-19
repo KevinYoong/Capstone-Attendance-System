@@ -19,7 +19,7 @@ export default function AdminLayout() {
 
   // 2. Render Admin Interface
   return (
-    <div className="flex bg-[#0a0f1f] text-white min-h-screen font-sans">
+    <div className="flex bg-[#0a0f1f] text-white h-screen font-sans overflow-hidden">
       {/* Left Sidebar Navigation */}
       <AdminSidebar />
 

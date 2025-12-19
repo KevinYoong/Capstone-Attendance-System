@@ -13,6 +13,7 @@ import {
   ArrowUpDown,
   X,
   Plus,
+  AlertCircle,
 } from "lucide-react";
 
 // ============================================================================
@@ -605,6 +606,16 @@ function GenericModal({ title, onClose, onSubmit, submitText, children, danger =
 function EnrollClassModal({ student, classes, onSearch, onClose, onEnroll }: any) {
   const [term, setTerm] = useState("");
 
+  // Helper to check for visual clashes in the UI
+  const checkLocalClash = (newCls: any) => {
+    // Assuming student object has enrolled classes with day/time details
+    // If details aren't in the student object, the backend clash check handles the hard block.
+    return student.classes?.some((c: any) => 
+      c.day_of_week === newCls.day_of_week && 
+      ((newCls.start_time < c.end_time && newCls.end_time > c.start_time))
+    );
+  };
+
   useEffect(() => {
     const timer = setTimeout(() => onSearch(term), 300);
     return () => clearTimeout(timer);
@@ -636,11 +647,16 @@ function EnrollClassModal({ student, classes, onSearch, onClose, onEnroll }: any
             classes.map((cls: any) => {
               const isEnrolled = student.classes?.some((c: any) => c.class_id === cls.class_id);
               return (
-                <div key={cls.class_id} className="flex justify-between items-center bg-[#111] p-3 rounded-lg border border-white/5 hover:border-white/10 transition">
+                <div key={cls.class_id} className="flex justify-between items-center bg-[#111] p-3 rounded-lg border border-white/5">
                   <div className="flex flex-col">
                     <div className="font-bold text-white text-xs">{cls.course_code}</div>
                     <div className="text-[11px] text-gray-400">{cls.class_name}</div>
-                    <div className="text-[10px] text-gray-500 mt-1 uppercase tracking-tight">{cls.lecturer_name || "Unassigned"}</div>
+                    {/* WARNING UI */}
+                    {checkLocalClash(cls) && (
+                      <div className="flex items-center gap-1 text-[9px] text-orange-500 font-bold uppercase mt-1">
+                        <AlertCircle size={10} /> Schedule Clash Detected
+                      </div>
+                    )}
                   </div>
                   {isEnrolled ? (
                      <span className="text-[10px] uppercase font-bold text-gray-500 px-3 py-1 bg-white/5 rounded">Enrolled</span>
