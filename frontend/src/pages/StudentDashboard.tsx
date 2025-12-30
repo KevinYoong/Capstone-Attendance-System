@@ -44,6 +44,7 @@ interface ActiveSession {
   expiresAt: string;
   onlineMode: boolean;
   scheduled_date: string;
+  week_number?: number;
 }
 
 // ==========================================
@@ -64,8 +65,14 @@ function getCurrentAcademicWeek(startDateStr: string): number {
   const diffDays = Math.floor((today.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
   const week = Math.floor(diffDays / 7) + 1;
 
-  // Clamp range 1–14
-  return Math.max(1, Math.min(14, week));
+  return Math.max(1, week);
+}
+
+function getTotalWeeks(startDateStr: string, endDateStr: string): number {
+  const start = new Date(startDateStr);
+  const end = new Date(endDateStr);
+  const diffDays = Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)); 
+  return Math.ceil(diffDays / 7);
 }
 
 // ==========================================
@@ -88,6 +95,8 @@ export default function StudentDashboard() {
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
   const [loadingSemester, setLoadingSemester] = useState<boolean>(true);
   const [isViewingSemBreak, setIsViewingSemBreak] = useState<boolean>(false);
+  const totalCalendarWeeks = semester ? getTotalWeeks(semester.start_date, semester.end_date) : 15;
+  const totalAcademicWeeks = totalCalendarWeeks - 1;
   
   // UI State
   const [openDays, setOpenDays] = useState<string[]>([]);
@@ -145,6 +154,7 @@ export default function StudentDashboard() {
           expiresAt: new Date(s.expires_at).toISOString(),
           onlineMode: !!s.online_mode,
           scheduled_date: s.scheduled_date, 
+          week_number: s.week_number,
         };
       });
 
@@ -203,8 +213,10 @@ export default function StudentDashboard() {
         if (res.data.success) {
           const sem = res.data.data;
           const computedWeek = getCurrentAcademicWeek(sem.start_date);
-          setSemester({ ...sem, current_week: computedWeek });
-          setSelectedWeek(computedWeek);
+          const maxWeeks = getTotalWeeks(sem.start_date, sem.end_date);
+          const clampedWeek = Math.min(computedWeek, maxWeeks);
+          setSemester({ ...sem, current_week: clampedWeek });
+          setSelectedWeek(clampedWeek);
         }
       } catch (err) {
         console.error("Error fetching semester:", err);
@@ -235,6 +247,7 @@ export default function StudentDashboard() {
           expiresAt: new Date(data.expiresAt ?? data.expires_at).toISOString(),
           onlineMode: !!onlineMode,
           scheduled_date: data.scheduled_date,
+          week_number: data.week_number,
         },
       }));
     };
@@ -310,12 +323,15 @@ export default function StudentDashboard() {
     }
   };
 
+    // 1. Calculate total weeks dynamically
+  const totalWeeks = semester ? getTotalWeeks(semester.start_date, semester.end_date) : 14;
+
   // Week Navigation Logic
   const handlePreviousWeek = () => {
     if (isViewingSemBreak) {
       setIsViewingSemBreak(false);
       setSelectedWeek(7);
-    } else if (selectedWeek === 8) {
+    } else if (selectedWeek === 9) { 
       setIsViewingSemBreak(true);
     } else if (selectedWeek > 1) {
       setSelectedWeek(selectedWeek - 1);
@@ -325,18 +341,33 @@ export default function StudentDashboard() {
   const handleNextWeek = () => {
     if (isViewingSemBreak) {
       setIsViewingSemBreak(false);
-      setSelectedWeek(8);
+      setSelectedWeek(9); 
     } else if (selectedWeek === 7) {
       setIsViewingSemBreak(true);
-    } else if (selectedWeek < 14) {
+    } else if (selectedWeek < totalCalendarWeeks) {
       setSelectedWeek(selectedWeek + 1);
     }
   };
 
   const handleCurrentWeek = () => {
     if (semester) {
-      setIsViewingSemBreak(false);
-      setSelectedWeek(semester.current_week);
+      // 1. Calculate the raw week number based on today's date
+      const current = getCurrentAcademicWeek(semester.start_date);
+
+      // 2. Handle the Semester Break (Week 8)
+      if (current === 8) {
+        setIsViewingSemBreak(true);
+        setSelectedWeek(8);
+      } else {
+        setIsViewingSemBreak(false);
+
+        // 3. CLAMP: Ensure we don't go past the last calendar week (e.g. Week 15)
+        // If 'current' is 20, this forces it back to 15.
+        const maxWeeks = getTotalWeeks(semester.start_date, semester.end_date);
+        const clampedWeek = Math.min(current, maxWeeks);
+        
+        setSelectedWeek(clampedWeek);
+      }
     }
   };
 
@@ -401,7 +432,9 @@ export default function StudentDashboard() {
                      class_id: classId,
                      started_at: session.startedAt, 
                      student_status: 'present',
-                     scheduled_date: session.scheduled_date 
+                     scheduled_date: session.scheduled_date,
+                     week_number: session.week_number,
+                     day_name: new Date(session.startedAt).toLocaleDateString('en-US', { weekday: 'long' })
                  }];
              });
             alert("✅ Check-in successful!");
@@ -470,7 +503,7 @@ export default function StudentDashboard() {
                     <span className="text-orange-400 font-semibold text-xl">🏖️ Semester Break</span>
                   ) : (
                     <span>
-                      Week <span className="font-bold text-white">{selectedWeek}</span> of 14
+                      Week <span className="font-bold text-white">{selectedWeek > 7 ? selectedWeek - 1 : selectedWeek}</span> of {totalAcademicWeeks}
                     </span>
                   )}
                 </p>
@@ -498,9 +531,9 @@ export default function StudentDashboard() {
                 )}
                 <button
                   onClick={handleNextWeek}
-                  disabled={!isViewingSemBreak && selectedWeek >= 14}
+                  disabled={!isViewingSemBreak && selectedWeek >= totalCalendarWeeks}
                   className={`px-4 py-2 rounded-lg font-semibold transition ${
-                    (!isViewingSemBreak && selectedWeek >= 14)
+                    (!isViewingSemBreak && selectedWeek >= totalWeeks)
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-blue-600 hover:bg-blue-500 text-white'
                   }`}
@@ -544,12 +577,16 @@ export default function StudentDashboard() {
 
                     // Find if check-in exists for this class on this day
                     const sessionForThisWeek = attendanceSessions.find((s) => {
-                        if (s.class_id !== cls.class_id) return false;
-                        if (s.scheduled_date) {
-                            return s.scheduled_date === rowIsoDate;
-                        }
-                        const sDate = new Date(s.started_at).toLocaleDateString('en-CA');
-                        return sDate === rowIsoDate;
+                      if (s.class_id !== cls.class_id) return false;
+
+                      // Priority A: Exact Date Match
+                      if (s.scheduled_date === rowIsoDate) return true;
+
+                      // Priority B: Week & Day Match (Fixes Semester Date Shifts)
+                      // Note: 'day' comes from the map loop ("Monday", "Tuesday", etc.)
+                      if (s.week_number === selectedWeek && s.day_name === day) return true;
+
+                      return false;
                     });
 
                     const isCheckedIn = sessionForThisWeek?.student_status === "present" || 
@@ -559,11 +596,18 @@ export default function StudentDashboard() {
                     // Determine if check-in is currently active
                     let isActive = false;
                     const active = activeSessions[cls.class_id];
-                    if (active && rowDateObj) {
-                        const rowIsoDate = rowDateObj.toLocaleDateString('en-CA'); 
-                        if (active.scheduled_date === rowIsoDate && !isCheckedIn && !isMissed) {
-                            isActive = true;
-                        }
+                    if (active && !isCheckedIn && !isMissed) {
+                      // Check A: Date Match
+                      const isDateMatch = active.scheduled_date === rowIsoDate;
+                      
+                      // Check B: Week Match (Fallback)
+                      // We derive the day name from the active session to ensure we highlight the correct day card
+                      const activeDayName = new Date(active.scheduled_date).toLocaleDateString('en-US', { weekday: 'long' });
+                      const isWeekMatch = (active.week_number === selectedWeek) && (activeDayName === day);
+
+                      if (isDateMatch || isWeekMatch) {
+                        isActive = true;
+                      }
                     }
 
                     const analytics = attendanceSummaryByClass[cls.class_id];

@@ -164,7 +164,9 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
         s.expires_at,
         s.online_mode,
         s.is_expired,
-        s.scheduled_date,  
+        s.scheduled_date, 
+        s.week_number,  /* Added field */
+        DAYNAME(s.started_at) as day_name, /* Added field for easier matching */
         c.class_name,
         c.course_code,
         ci.status AS student_status
@@ -173,8 +175,9 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
       JOIN StudentClass sc ON sc.class_id = s.class_id AND sc.student_id = ?
       LEFT JOIN Checkin ci 
         ON ci.session_id = s.session_id 
-       AND ci.student_id = ?
-      WHERE s.started_at BETWEEN ? AND ?
+        AND ci.student_id = ?
+      WHERE s.started_at >= ? 
+        AND s.started_at <= DATE_ADD(?, INTERVAL 8 WEEK)
       ORDER BY s.started_at ASC
       `,
       [student_id, student_id, semester.start_date, semester.end_date]
@@ -196,6 +199,8 @@ router.get("/:student_id/attendance/semester", async (req: Request, res: Respons
         expires_at: s.expires_at,
         online_mode: s.online_mode,
         student_status: status,
+        week_number: s.week_number,
+        day_name: s.day_name, 
         scheduled_date: s.scheduled_date
           ? new Date(s.scheduled_date).toLocaleDateString("en-CA")
           : null,
@@ -270,7 +275,7 @@ router.get("/:student_id/active-sessions", async (req: Request, res: Response) =
   try {
     const [rows] = await db.query<any[]>(
       `
-      SELECT s.session_id, s.class_id, s.started_at, s.expires_at, s.online_mode, s.scheduled_date
+      SELECT s.session_id, s.class_id, s.started_at, s.expires_at, s.online_mode, s.scheduled_date, s.week_number
       FROM Session s
       JOIN StudentClass sc ON sc.class_id = s.class_id
       WHERE sc.student_id = ?
@@ -298,6 +303,7 @@ router.get("/:student_id/active-sessions", async (req: Request, res: Response) =
         expires_at: r.expires_at,
         online_mode: !!r.online_mode,
         scheduled_date: formattedDate,
+        week_number: r.week_number,
       };
     });
 

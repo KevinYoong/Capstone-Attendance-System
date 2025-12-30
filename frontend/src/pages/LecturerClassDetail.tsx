@@ -87,7 +87,10 @@ export default function LecturerClassDetail() {
       const res = await axios.get(
         `http://localhost:3001/lecturer/class/${class_id}/details`,
         {
-          params: forceIgnoreDate ? {} : { date: sessionDate ?? undefined }
+          params: { 
+            week: fromWeek, 
+            date: forceIgnoreDate ? undefined : (sessionDate ?? undefined)
+          }
         }
       );
 
@@ -221,6 +224,7 @@ export default function LecturerClassDetail() {
     try {
       const res = await axios.post(`http://localhost:3001/lecturer/class/${class_id}/activate-checkin`, {
         online_mode: onlineMode,
+        custom_week: fromWeek
       });
 
       setSession({

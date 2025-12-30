@@ -37,7 +37,7 @@ interface Semester {
 }
 
 // Map of class_id -> expiration_time_string
-type ActiveSessionMap = Record<number, string>;
+type ActiveSessionMap = Record<number, { expiresAt: string; weekNumber: number }>;
 
 // ==========================================
 // Helper Functions
@@ -59,18 +59,14 @@ function getCurrentAcademicWeek(startDateStr: string): number {
   // Week 1 = days 0–6 → week = 1 + (days / 7)
   const week = Math.floor(diffDays / 7) + 1;
 
-  // Clamp range 1–14
-  return Math.max(1, Math.min(14, week));
+  return Math.max(1, week);
 }
 
-/**
- * Formats a date object to "YYYY-MM-DD" using local time.
- */
-function formatLocalYMD(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function getTotalWeeks(startDateStr: string, endDateStr: string): number {
+  const start = new Date(startDateStr);
+  const end = new Date(endDateStr);
+  const diffDays = Math.ceil(Math.abs(end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)); 
+  return Math.ceil(diffDays / 7);
 }
 
 // ==========================================
@@ -104,6 +100,8 @@ export default function LecturerDashboard() {
   const [selectedWeek, setSelectedWeek] = useState<number>(1);
   const [loadingSemester, setLoadingSemester] = useState<boolean>(true);
   const [isViewingSemBreak, setIsViewingSemBreak] = useState<boolean>(false);
+  const totalCalendarWeeks = semester ? getTotalWeeks(semester.start_date, semester.end_date) : 15;
+  const totalAcademicWeeks = totalCalendarWeeks - 1;
 
   // ------------------------------------------
   // Handlers
@@ -120,11 +118,14 @@ export default function LecturerDashboard() {
   // ------------------------------------------
   // Navigation Logic (Previous/Next/Current)
   // ------------------------------------------
+  // 1. Calculate total weeks dynamically
+  const totalWeeks = semester ? getTotalWeeks(semester.start_date, semester.end_date) : 14;
+
   const handlePreviousWeek = () => {
     if (isViewingSemBreak) {
       setIsViewingSemBreak(false);
       setSelectedWeek(7);
-    } else if (selectedWeek === 8) {
+    } else if (selectedWeek === 9) { 
       setIsViewingSemBreak(true);
     } else if (selectedWeek > 1) {
       setSelectedWeek(selectedWeek - 1);
@@ -134,18 +135,33 @@ export default function LecturerDashboard() {
   const handleNextWeek = () => {
     if (isViewingSemBreak) {
       setIsViewingSemBreak(false);
-      setSelectedWeek(8);
+      setSelectedWeek(9);
     } else if (selectedWeek === 7) {
       setIsViewingSemBreak(true);
-    } else if (selectedWeek < 14) {
+    } else if (selectedWeek < totalCalendarWeeks) {
       setSelectedWeek(selectedWeek + 1);
     }
   };
 
   const handleCurrentWeek = () => {
     if (semester) {
-      setIsViewingSemBreak(false);
-      setSelectedWeek(semester.current_week);
+      // 1. Calculate the raw week number based on today's date
+      const current = getCurrentAcademicWeek(semester.start_date);
+
+      // 2. Handle the Semester Break (Week 8)
+      if (current === 8) {
+        setIsViewingSemBreak(true);
+        setSelectedWeek(8);
+      } else {
+        setIsViewingSemBreak(false);
+
+        // 3. CLAMP: Ensure we don't go past the last calendar week (e.g. Week 15)
+        // If 'current' is 20, this forces it back to 15.
+        const maxWeeks = getTotalWeeks(semester.start_date, semester.end_date);
+        const clampedWeek = Math.min(current, maxWeeks);
+        
+        setSelectedWeek(clampedWeek);
+      }
     }
   };
 
@@ -185,15 +201,16 @@ export default function LecturerDashboard() {
   // ------------------------------------------
   const fetchActiveSessionsForWeek = async (classes: Class[]) => {
     const map: ActiveSessionMap = {}; 
-
     for (const cls of classes) {
       try {
         const res = await axios.get(
           `http://localhost:3001/lecturer/class/${cls.class_id}/active-session`
         );
-
         if (res.data?.session && !res.data.session.is_expired) {
-          map[cls.class_id] = res.data.session.expires_at; 
+          map[cls.class_id] = {
+            expiresAt: res.data.session.expires_at,
+            weekNumber: res.data.session.week_number 
+          };
         }
       } catch (err) {
         console.error("Error fetching active session for class:", cls.class_id, err);
@@ -215,8 +232,8 @@ export default function LecturerDashboard() {
         const nextSessions = { ...prevSessions };
         let hasChanges = false;
 
-        Object.entries(nextSessions).forEach(([classIdStr, expiresAt]) => {
-          if (expiresAt && new Date(expiresAt) < now) {
+        Object.entries(nextSessions).forEach(([classIdStr, sessionData]) => {
+          if (sessionData?.expiresAt && new Date(sessionData.expiresAt) < now) {
             const classId = Number(classIdStr);
             
             // Remove from Active
@@ -225,8 +242,8 @@ export default function LecturerDashboard() {
             // Add to Past Sessions
             setPastActivatedSessions(prev => {
                const newSet = new Set(prev);
-               const todayStr = formatLocalYMD(new Date()); 
-               newSet.add(`${classId}_${todayStr}`);
+               const key = `${classId}_W${sessionData.weekNumber}`;
+               newSet.add(key);
                return newSet;
             });
 
@@ -252,9 +269,11 @@ export default function LecturerDashboard() {
         if (res.data.success) {
           const sem = res.data.data;
           const computedWeek = getCurrentAcademicWeek(sem.start_date);
-          setSemester({ ...sem, current_week: computedWeek });
+          const maxWeeks = getTotalWeeks(sem.start_date, sem.end_date);
+          const clampedWeek = Math.min(computedWeek, maxWeeks);
+          setSemester({ ...sem, current_week: clampedWeek });
           
-          setSelectedWeek(restoreWeek ?? computedWeek);
+          setSelectedWeek(restoreWeek ?? clampedWeek);
           setIsViewingSemBreak(restoreSemBreak ?? false);
         }
       } catch (err) {
@@ -293,10 +312,7 @@ export default function LecturerDashboard() {
 
     const fetchPastActivations = async () => {
       try {
-        const res = await axios.get(
-          `http://localhost:3001/lecturer/${user.id}/attendance/semester`
-        );
-
+        const res = await axios.get(`http://localhost:3001/lecturer/${user.id}/attendance/semester`);
         if (!res.data?.success) return;
 
         const classList = res.data.classes || [];
@@ -305,9 +321,16 @@ export default function LecturerDashboard() {
         classList.forEach((c: any) => {
           if (c.sessions && c.sessions.length > 0) {
             c.sessions.forEach((session: any) => {
-              const localDate = formatLocalYMD(new Date(session.started_date));
-              const key = `${c.class_id}_${localDate}`;
-              set.add(key);
+              // 1. Store Week Key
+              set.add(`${c.class_id}_W${session.week_number}`);
+              
+              // 2. Store Date Key (Fallback for shifted semesters)
+              // Use scheduled_date if available, else started_date
+              const dateStr = session.scheduled_date 
+                ? new Date(session.scheduled_date).toLocaleDateString("en-CA") 
+                : new Date(session.started_at).toLocaleDateString("en-CA");
+              
+              set.add(`${c.class_id}_${dateStr}`);
             });
           }
         });
@@ -410,7 +433,7 @@ export default function LecturerDashboard() {
                     <span className="text-orange-400 font-semibold text-xl">🏖️ Semester Break</span>
                   ) : (
                     <span>
-                      Week <span className="font-bold text-white">{selectedWeek}</span> of 14
+                      Week <span className="font-bold text-white">{selectedWeek > 7 ? selectedWeek - 1 : selectedWeek}</span> of {totalAcademicWeeks}
                     </span>
                   )}
                 </p>
@@ -441,9 +464,9 @@ export default function LecturerDashboard() {
 
                 <button
                   onClick={handleNextWeek}
-                  disabled={!isViewingSemBreak && selectedWeek >= 14}
+                  disabled={!isViewingSemBreak && selectedWeek >= totalCalendarWeeks}
                   className={`px-4 py-2 rounded-lg font-semibold transition ${
-                    !isViewingSemBreak && selectedWeek >= 14
+                    !isViewingSemBreak && selectedWeek >= totalWeeks
                       ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                       : 'bg-blue-600 hover:bg-blue-500 text-white'
                   }`}
@@ -541,14 +564,16 @@ export default function LecturerDashboard() {
                         className={`mt-2 md:mt-0 px-4 py-2 text-white rounded-lg transition ${
                           activeSessions[cls.class_id]
                             ? "bg-green-600 hover:bg-green-500"
-                            : pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`)
+                            : (pastActivatedSessions.has(`${cls.class_id}_W${selectedWeek}`) || 
+                               pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`))
                               ? "bg-blue-600 hover:bg-blue-500"
                               : "bg-gray-500 hover:bg-gray-400"
                         }`}
                       >
-                        {activeSessions[cls.class_id]
+                        {activeSessions[cls.class_id]?.weekNumber === selectedWeek
                           ? "Active Now"
-                          : pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`)
+                          : (pastActivatedSessions.has(`${cls.class_id}_W${selectedWeek}`) || 
+                             pastActivatedSessions.has(`${cls.class_id}_${getFullDateForDay(day)}`))
                             ? "Previously Activated"
                             : "Activate Check-In"}
                       </button>

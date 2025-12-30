@@ -262,6 +262,7 @@ router.get("/:lecturer_id/attendance/semester", async (req: Request, res: Respon
 router.get("/class/:class_id/details", async (req: Request, res: Response) => {
   const { class_id } = req.params;
   const selectedDate = req.query.date as string | undefined;
+  const selectedWeek = req.query.week as string | undefined;
 
   try {
     const [classRows] = await db.query<ClassRow[]>(
@@ -288,64 +289,65 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
     let session: SessionRow | null = null;
     let checkins: CheckinRow[] = [];
 
+    // 1. Priority 1: Match by specific Date 
+    // (This works best for "Previously Activated" sessions where we know the exact date)
     if (selectedDate) {
-      // Check against scheduled_date OR date(started_at)
       const [sessionRows] = await db.query<SessionRow[]>(
-        `
-        SELECT *
-        FROM Session
-        WHERE class_id = ?
-          AND (scheduled_date = ? OR DATE(started_at) = ?)
-        LIMIT 1
-        `,
+        `SELECT * FROM Session 
+         WHERE class_id = ? 
+           AND (scheduled_date = ? OR DATE(started_at) = ?) 
+         LIMIT 1`,
         [class_id, selectedDate, selectedDate]
       );
-
-      session = sessionRows.length > 0 ? sessionRows[0] : null;
-
-      if (session) {
-        const [checkinRows] = await db.query<CheckinRow[]>(
-          `SELECT * FROM Checkin WHERE session_id = ?`,
-          [session.session_id]
-        );
-        checkins = checkinRows;
+      if (sessionRows.length > 0) {
+        session = sessionRows[0];
       }
-    } else {
-      // Fallback: Get the most recent session if no date provided
+    }
+
+    // 2. Priority 2: Match by Week Number
+    // (Run this if Date search failed OR if no Date was provided)
+    if (!session && selectedWeek) {
+      const [sessionRows] = await db.query<SessionRow[]>(
+        `SELECT * FROM Session 
+         WHERE class_id = ? 
+           AND week_number = ? 
+         LIMIT 1`,
+        [class_id, selectedWeek]
+      );
+      if (sessionRows.length > 0) {
+        session = sessionRows[0];
+      }
+    }
+
+    // 3. Priority 3: Default to most recent (Fallback)
+    // (Only run if we have absolutely no specific criteria)
+    if (!session && !selectedDate && !selectedWeek) {
       const [semesterRows] = await db.query<any[]>(
         `SELECT start_date, end_date FROM Semester WHERE status='active' LIMIT 1`
       );
       const semester = semesterRows[0];
-
       const [sessionRows] = await db.query<SessionRow[]>(
-        `
-        SELECT *
-        FROM Session
-        WHERE class_id = ?
-          AND started_at BETWEEN ? AND ?
-        ORDER BY started_at DESC
-        LIMIT 1
-        `,
+        `SELECT * FROM Session 
+         WHERE class_id = ? 
+           AND started_at BETWEEN ? AND ? 
+         ORDER BY started_at DESC 
+         LIMIT 1`,
         [class_id, semester.start_date, semester.end_date]
       );
-
-      session = sessionRows.length > 0 ? sessionRows[0] : null;
-
-      if (session) {
-        const [checkinRows] = await db.query<CheckinRow[]>(
-          `SELECT * FROM Checkin WHERE session_id = ?`,
-          [session.session_id]
-        );
-        checkins = checkinRows;
+      if (sessionRows.length > 0) {
+        session = sessionRows[0];
       }
     }
 
-    return res.json({
-      classInfo,
-      students: studentRows,
-      session,
-      checkins
-    });
+    if (session) {
+      const [checkinRows] = await db.query<CheckinRow[]>(
+        `SELECT * FROM Checkin WHERE session_id = ?`,
+        [session.session_id]
+      );
+      checkins = checkinRows;
+    }
+
+    return res.json({ classInfo, students: studentRows, session, checkins });
   } catch (err) {
     console.error("Error retrieving class details:", err);
     return res.status(500).json({ message: "Error retrieving class details" });
@@ -361,6 +363,7 @@ router.get("/class/:class_id/details", async (req: Request, res: Response) => {
  */
 router.post("/class/:class_id/activate-checkin", async (req: Request, res: Response) => {
   const { class_id } = req.params;
+  const { online_mode, custom_week } = req.body;
 
   let conn: any = null;
   try {
@@ -405,7 +408,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
 
     // 3. Create new Session
     const startedAt = new Date();
-    const expiresAt = new Date(startedAt.getTime() + 30 * 60000); // 30 minutes duration
+    const expiresAt = new Date(startedAt.getTime() + 2 * 60000); // 2 minutes duration
 
     console.log("⏱️ [Activate] Server Time:", startedAt);
     console.log("⏱️ [Activate] Expires At:", expiresAt);
@@ -415,7 +418,7 @@ router.post("/class/:class_id/activate-checkin", async (req: Request, res: Respo
       `SELECT start_date FROM Semester WHERE status='active' LIMIT 1`
     );
     const semesterStart = new Date(semRows[0].start_date);
-    const weekNumber = getAcademicWeek(semesterStart, startedAt);
+    const weekNumber = custom_week ? Number(custom_week) : getAcademicWeek(semesterStart, startedAt);
     
     const [classRows] = await conn.query(
       `SELECT day_of_week, start_time FROM Class WHERE class_id = ?`,
